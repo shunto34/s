@@ -1,10 +1,10 @@
 //+------------------------------------------------------------------+
 //| Visual_Logic_Masterpiece.mq5                                      |
-//| v4.0 - Liquidity Sweep + 三尊/逆三尊 + Push通知専用               |
+//| v5.0 - 独自デザインUI刷新 + Liquidity Sweep + 三尊/逆三尊          |
 //+------------------------------------------------------------------+
-#property copyright "Visual Logic Masterpiece v4.0"
+#property copyright "Visual Logic Masterpiece v5.0"
 #property link      ""
-#property version   "4.00"
+#property version   "5.00"
 #property strict
 #property indicator_chart_window
 
@@ -92,9 +92,9 @@ input double InpTPMultiplier  = 2.0;
 input color  InpTPColor       = C'0,255,100';
 
 input group "===== ダッシュボード設定 ====="
-input color  InpBullColor     = C'0,170,255';
-input color  InpBearColor     = C'255,60,60';
-input int    InpDashFontSize  = 9;
+input color  InpBullColor     = C'0,200,220';     // シアン系
+input color  InpBearColor     = C'220,50,80';      // ローズ系
+input int    InpDashFontSize  = 10;
 
 input group "===== Push通知設定 ====="
 input bool   InpPushNotify    = false;       // プッシュ通知（MT5モバイル）
@@ -182,7 +182,7 @@ int OnInit()
 
    CreateUIElements();
    EventSetTimer(1);
-   IndicatorSetString(INDICATOR_SHORTNAME, "VLM v4");
+   IndicatorSetString(INDICATOR_SHORTNAME, "VLM v5");
    return(INIT_SUCCEEDED);
 }
 
@@ -664,7 +664,7 @@ int OnCalculate(const int rates_total,
    {
       g_lastDashBar = rates_total;
       UpdateDashboard();
-      UpdateTrendBox(fastEMA[rates_total-1] > slowEMA[rates_total-1]);
+      UpdateTrendPanel(fastEMA[rates_total-1] > slowEMA[rates_total-1]);
    }
 
    return(rates_total);
@@ -698,6 +698,10 @@ void OnChartEvent(const int id, const long &lparam,
          for(int p=0;p<=7;p++) PlotIndexSetInteger(p,PLOT_DRAW_TYPE,DRAW_NONE);
          ObjectDelete(0,g_prefix+"TPLine");
       }
+      // ステータスラベル更新
+      string statusText = g_indicatorON ? "\x25CF ON" : "\x25CF OFF";
+      ObjectSetString(0,g_prefix+"TrendStatus",OBJPROP_TEXT,statusText);
+      ObjectSetInteger(0,g_prefix+"TrendStatus",OBJPROP_COLOR,g_indicatorON?C'0,255,100':C'80,80,80');
       ChartRedraw();
       ObjectSetInteger(0,g_prefix+"BtnOnOff",OBJPROP_STATE,false);
    }
@@ -747,88 +751,130 @@ void UpdateTPInfo()
 }
 
 //+------------------------------------------------------------------+
-//| CreateUIElements - v4: コンパクトUI                                 |
+//| CreateUIElements - v5: 独自デザインUI                              |
 //+------------------------------------------------------------------+
 void CreateUIElements()
 {
    int x0 = 10;
 
-   //=== トレンドボックス ===
-   string box = g_prefix+"TrendBox";
-   ObjectCreate(0,box,OBJ_RECTANGLE_LABEL,0,0,0);
-   ObjectSetInteger(0,box,OBJPROP_CORNER,CORNER_LEFT_UPPER);
-   ObjectSetInteger(0,box,OBJPROP_XDISTANCE,x0);
-   ObjectSetInteger(0,box,OBJPROP_YDISTANCE,20);
-   ObjectSetInteger(0,box,OBJPROP_XSIZE,48);
-   ObjectSetInteger(0,box,OBJPROP_YSIZE,40);
-   ObjectSetInteger(0,box,OBJPROP_BGCOLOR,C'15,17,28');
-   ObjectSetInteger(0,box,OBJPROP_COLOR,InpBullColor);
-   ObjectSetInteger(0,box,OBJPROP_BORDER_TYPE,BORDER_FLAT);
-   ObjectSetInteger(0,box,OBJPROP_WIDTH,2);
-   ObjectSetInteger(0,box,OBJPROP_BACK,false);
+   //=== トレンドパネル（右上・角丸パネル風） ===
+   string tbg = g_prefix+"TrendBG";
+   ObjectCreate(0,tbg,OBJ_RECTANGLE_LABEL,0,0,0);
+   ObjectSetInteger(0,tbg,OBJPROP_CORNER,CORNER_RIGHT_UPPER);
+   ObjectSetInteger(0,tbg,OBJPROP_XDISTANCE,15);
+   ObjectSetInteger(0,tbg,OBJPROP_YDISTANCE,20);
+   ObjectSetInteger(0,tbg,OBJPROP_XSIZE,140);
+   ObjectSetInteger(0,tbg,OBJPROP_YSIZE,62);
+   ObjectSetInteger(0,tbg,OBJPROP_BGCOLOR,C'15,17,28');
+   ObjectSetInteger(0,tbg,OBJPROP_COLOR,InpBullColor);
+   ObjectSetInteger(0,tbg,OBJPROP_BORDER_TYPE,BORDER_FLAT);
+   ObjectSetInteger(0,tbg,OBJPROP_WIDTH,2);
+   ObjectSetInteger(0,tbg,OBJPROP_BACK,false);
 
-   MakeLabel(g_prefix+"TrendArrow","é",x0+16,28,clrWhite,"Wingdings",18,CORNER_LEFT_UPPER);
-   MakeLabel(g_prefix+"OnOffLabel","ON",x0+34,47,C'0,255,100',"Arial Bold",7,CORNER_LEFT_UPPER);
+   // 方向アイコン（Wingdings矢印）
+   MakeLabel(g_prefix+"TrendIcon","\xE9",120,30,InpBullColor,"Wingdings",28,CORNER_RIGHT_UPPER);
+   // BULL/BEARテキスト
+   MakeLabel(g_prefix+"TrendText","BULL",70,32,InpBullColor,"Arial Bold",16,CORNER_RIGHT_UPPER);
+   // ● ON / ● OFF ステータス
+   MakeLabel(g_prefix+"TrendStatus","\x25CF ON",85,58,C'0,255,100',"Arial Bold",8,CORNER_RIGHT_UPPER);
 
-   //=== ボタン ===
-   int by = 64;
-   MakeButton(g_prefix+"Btn1m",   "1m", x0, by,      48, 18);
-   MakeButton(g_prefix+"Btn5m",   "5m", x0, by+20,   48, 18);
-   MakeButton(g_prefix+"Btn15m",  "15m",x0, by+40,   48, 18);
-   MakeButton(g_prefix+"BtnOnOff","ON", x0, by+63,   48, 18);
+   //=== ボタン（左上） ===
+   int by = 20;
+   MakeButton(g_prefix+"Btn1m",   "1m", x0, by,      50, 20);
+   MakeButton(g_prefix+"Btn5m",   "5m", x0, by+22,   50, 20);
+   MakeButton(g_prefix+"Btn15m",  "15m",x0, by+44,   50, 20);
+   MakeButton(g_prefix+"BtnOnOff","ON", x0, by+69,   50, 20);
 
    //=== TP情報 ===
-   MakeLabel(g_prefix+"TPInfo","TP: ---",x0+2,by+85,C'80,80,80',"Arial",7,CORNER_LEFT_UPPER);
+   MakeLabel(g_prefix+"TPInfo","TP: ---",x0+2,by+94,C'80,80,80',"Arial",8,CORNER_LEFT_UPPER);
 
-   //=== ダッシュボード（左下） ===
+   //=== MTFダッシュボード（右下テーブル） ===
    string bg = g_prefix+"DashBG";
    ObjectCreate(0,bg,OBJ_RECTANGLE_LABEL,0,0,0);
-   ObjectSetInteger(0,bg,OBJPROP_CORNER,CORNER_LEFT_LOWER);
-   ObjectSetInteger(0,bg,OBJPROP_XDISTANCE,8);
-   ObjectSetInteger(0,bg,OBJPROP_YDISTANCE,115);
-   ObjectSetInteger(0,bg,OBJPROP_XSIZE,175);
-   ObjectSetInteger(0,bg,OBJPROP_YSIZE,100);
+   ObjectSetInteger(0,bg,OBJPROP_CORNER,CORNER_RIGHT_LOWER);
+   ObjectSetInteger(0,bg,OBJPROP_XDISTANCE,15);
+   ObjectSetInteger(0,bg,OBJPROP_YDISTANCE,130);
+   ObjectSetInteger(0,bg,OBJPROP_XSIZE,210);
+   ObjectSetInteger(0,bg,OBJPROP_YSIZE,118);
    ObjectSetInteger(0,bg,OBJPROP_BGCOLOR,C'15,17,28');
-   ObjectSetInteger(0,bg,OBJPROP_COLOR,C'40,100,180');
+   ObjectSetInteger(0,bg,OBJPROP_COLOR,C'40,55,75');
    ObjectSetInteger(0,bg,OBJPROP_BORDER_TYPE,BORDER_FLAT);
    ObjectSetInteger(0,bg,OBJPROP_WIDTH,2);
    ObjectSetInteger(0,bg,OBJPROP_BACK,false);
 
-   MakeLabel(g_prefix+"DashTitle","MTF Dashboard",16,112,C'100,140,200',"Arial",7,CORNER_LEFT_LOWER);
+   MakeLabel(g_prefix+"DashTitle","MTF Analysis",190,127,C'120,150,200',"Arial Bold",8,CORNER_RIGHT_LOWER);
+
+   // ヘッダー区切り線
+   string sep = g_prefix+"DashSepH";
+   ObjectCreate(0,sep,OBJ_RECTANGLE_LABEL,0,0,0);
+   ObjectSetInteger(0,sep,OBJPROP_CORNER,CORNER_RIGHT_LOWER);
+   ObjectSetInteger(0,sep,OBJPROP_XDISTANCE,22);
+   ObjectSetInteger(0,sep,OBJPROP_YDISTANCE,109);
+   ObjectSetInteger(0,sep,OBJPROP_XSIZE,196);
+   ObjectSetInteger(0,sep,OBJPROP_YSIZE,1);
+   ObjectSetInteger(0,sep,OBJPROP_BGCOLOR,C'40,55,75');
+   ObjectSetInteger(0,sep,OBJPROP_COLOR,C'40,55,75');
+   ObjectSetInteger(0,sep,OBJPROP_BORDER_TYPE,BORDER_FLAT);
+   ObjectSetInteger(0,sep,OBJPROP_WIDTH,0);
+   ObjectSetInteger(0,sep,OBJPROP_BACK,false);
 
    string rows[3]={"1h","15m","5m"};
    for(int i=0;i<3;i++)
    {
-      int yB = 98 - i*28;
-      MakeLabel(g_prefix+"DashTF_"+IntegerToString(i),    rows[i],16,yB,C'170,180,210',"Arial Bold",InpDashFontSize,CORNER_LEFT_LOWER);
-      MakeLabel(g_prefix+"DashScore_"+IntegerToString(i), "50",   60,yB,clrWhite,"Arial Bold",InpDashFontSize+1,CORNER_LEFT_LOWER);
-      MakeLabel(g_prefix+"DashIcon_"+IntegerToString(i),  "é",   105,yB,InpBullColor,"Wingdings",InpDashFontSize+3,CORNER_LEFT_LOWER);
+      int yB = 100 - i*30;
+      string si = IntegerToString(i);
 
-      string bbg = g_prefix+"DashBarBG_"+IntegerToString(i);
+      // 時間足ラベル
+      MakeLabel(g_prefix+"DashTF_"+si, rows[i], 198, yB, C'170,180,210', "Arial Bold", InpDashFontSize, CORNER_RIGHT_LOWER);
+      // スコア数値
+      MakeLabel(g_prefix+"DashScore_"+si, "50", 155, yB, clrWhite, "Arial Bold", InpDashFontSize+2, CORNER_RIGHT_LOWER);
+      // 方向テキスト ▲/▼
+      MakeLabel(g_prefix+"DashDir_"+si, "\x25B2", 120, yB, InpBullColor, "Arial", InpDashFontSize+2, CORNER_RIGHT_LOWER);
+
+      // プログレスバー背景
+      string bbg = g_prefix+"DashBarBG_"+si;
       ObjectCreate(0,bbg,OBJ_RECTANGLE_LABEL,0,0,0);
-      ObjectSetInteger(0,bbg,OBJPROP_CORNER,CORNER_LEFT_LOWER);
-      ObjectSetInteger(0,bbg,OBJPROP_XDISTANCE,128);
-      ObjectSetInteger(0,bbg,OBJPROP_YDISTANCE,yB-2);
-      ObjectSetInteger(0,bbg,OBJPROP_XSIZE,40);
-      ObjectSetInteger(0,bbg,OBJPROP_YSIZE,8);
-      ObjectSetInteger(0,bbg,OBJPROP_BGCOLOR,C'35,37,50');
-      ObjectSetInteger(0,bbg,OBJPROP_COLOR,C'35,37,50');
+      ObjectSetInteger(0,bbg,OBJPROP_CORNER,CORNER_RIGHT_LOWER);
+      ObjectSetInteger(0,bbg,OBJPROP_XDISTANCE,28);
+      ObjectSetInteger(0,bbg,OBJPROP_YDISTANCE,yB-3);
+      ObjectSetInteger(0,bbg,OBJPROP_XSIZE,80);
+      ObjectSetInteger(0,bbg,OBJPROP_YSIZE,10);
+      ObjectSetInteger(0,bbg,OBJPROP_BGCOLOR,C'30,32,45');
+      ObjectSetInteger(0,bbg,OBJPROP_COLOR,C'40,42,55');
       ObjectSetInteger(0,bbg,OBJPROP_BORDER_TYPE,BORDER_FLAT);
       ObjectSetInteger(0,bbg,OBJPROP_WIDTH,0);
       ObjectSetInteger(0,bbg,OBJPROP_BACK,false);
 
-      string bar = g_prefix+"DashBar_"+IntegerToString(i);
+      // プログレスバー本体
+      string bar = g_prefix+"DashBar_"+si;
       ObjectCreate(0,bar,OBJ_RECTANGLE_LABEL,0,0,0);
-      ObjectSetInteger(0,bar,OBJPROP_CORNER,CORNER_LEFT_LOWER);
-      ObjectSetInteger(0,bar,OBJPROP_XDISTANCE,128);
-      ObjectSetInteger(0,bar,OBJPROP_YDISTANCE,yB-2);
-      ObjectSetInteger(0,bar,OBJPROP_XSIZE,20);
-      ObjectSetInteger(0,bar,OBJPROP_YSIZE,8);
+      ObjectSetInteger(0,bar,OBJPROP_CORNER,CORNER_RIGHT_LOWER);
+      ObjectSetInteger(0,bar,OBJPROP_XDISTANCE,28);
+      ObjectSetInteger(0,bar,OBJPROP_YDISTANCE,yB-3);
+      ObjectSetInteger(0,bar,OBJPROP_XSIZE,40);
+      ObjectSetInteger(0,bar,OBJPROP_YSIZE,10);
       ObjectSetInteger(0,bar,OBJPROP_BGCOLOR,InpBullColor);
       ObjectSetInteger(0,bar,OBJPROP_COLOR,InpBullColor);
       ObjectSetInteger(0,bar,OBJPROP_BORDER_TYPE,BORDER_FLAT);
       ObjectSetInteger(0,bar,OBJPROP_WIDTH,0);
       ObjectSetInteger(0,bar,OBJPROP_BACK,false);
+
+      // 行区切り線（最後の行以外）
+      if(i < 2)
+      {
+         string rsep = g_prefix+"DashSep_"+si;
+         ObjectCreate(0,rsep,OBJ_RECTANGLE_LABEL,0,0,0);
+         ObjectSetInteger(0,rsep,OBJPROP_CORNER,CORNER_RIGHT_LOWER);
+         ObjectSetInteger(0,rsep,OBJPROP_XDISTANCE,22);
+         ObjectSetInteger(0,rsep,OBJPROP_YDISTANCE,yB-12);
+         ObjectSetInteger(0,rsep,OBJPROP_XSIZE,196);
+         ObjectSetInteger(0,rsep,OBJPROP_YSIZE,1);
+         ObjectSetInteger(0,rsep,OBJPROP_BGCOLOR,C'35,40,55');
+         ObjectSetInteger(0,rsep,OBJPROP_COLOR,C'35,40,55');
+         ObjectSetInteger(0,rsep,OBJPROP_BORDER_TYPE,BORDER_FLAT);
+         ObjectSetInteger(0,rsep,OBJPROP_WIDTH,0);
+         ObjectSetInteger(0,rsep,OBJPROP_BACK,false);
+      }
    }
    ChartRedraw();
 }
@@ -874,20 +920,27 @@ void MakeButton(string name,string text,int x,int y,int w,int h)
 }
 
 //+------------------------------------------------------------------+
-//| UpdateTrendBox                                                     |
+//| UpdateTrendPanel - v5: 角丸パネル + BULL/BEAR表示                   |
 //+------------------------------------------------------------------+
-void UpdateTrendBox(bool isBullish)
+void UpdateTrendPanel(bool isBullish)
 {
    color c = isBullish ? InpBullColor : InpBearColor;
-   ObjectSetInteger(0,g_prefix+"TrendBox",OBJPROP_COLOR,c);
-   ObjectSetString(0,g_prefix+"TrendArrow",OBJPROP_TEXT,isBullish?"é":"ê");
-   ObjectSetInteger(0,g_prefix+"TrendArrow",OBJPROP_COLOR,clrWhite);
-   ObjectSetString(0,g_prefix+"OnOffLabel",OBJPROP_TEXT,g_indicatorON?"ON":"OFF");
-   ObjectSetInteger(0,g_prefix+"OnOffLabel",OBJPROP_COLOR,g_indicatorON?C'0,255,100':C'80,80,80');
+   // パネル枠色
+   ObjectSetInteger(0,g_prefix+"TrendBG",OBJPROP_COLOR,c);
+   // 方向アイコン
+   ObjectSetString(0,g_prefix+"TrendIcon",OBJPROP_TEXT,isBullish?"\xE9":"\xEA");
+   ObjectSetInteger(0,g_prefix+"TrendIcon",OBJPROP_COLOR,c);
+   // BULL/BEARテキスト
+   ObjectSetString(0,g_prefix+"TrendText",OBJPROP_TEXT,isBullish?"BULL":"BEAR");
+   ObjectSetInteger(0,g_prefix+"TrendText",OBJPROP_COLOR,c);
+   // ステータス
+   string statusText = g_indicatorON ? "\x25CF ON" : "\x25CF OFF";
+   ObjectSetString(0,g_prefix+"TrendStatus",OBJPROP_TEXT,statusText);
+   ObjectSetInteger(0,g_prefix+"TrendStatus",OBJPROP_COLOR,g_indicatorON?C'0,255,100':C'80,80,80');
 }
 
 //+------------------------------------------------------------------+
-//| UpdateDashboard                                                    |
+//| UpdateDashboard - v5: 右下テーブル + ▲▼ + プログレスバー           |
 //+------------------------------------------------------------------+
 void UpdateDashboard()
 {
@@ -918,11 +971,14 @@ void UpdateDashboard()
       color cc=bull?InpBullColor:InpBearColor;
       string rs=IntegerToString(row);
 
+      // スコア数値
       ObjectSetString(0,g_prefix+"DashScore_"+rs,OBJPROP_TEXT,IntegerToString(si));
       ObjectSetInteger(0,g_prefix+"DashScore_"+rs,OBJPROP_COLOR,cc);
-      ObjectSetString(0,g_prefix+"DashIcon_"+rs,OBJPROP_TEXT,bull?"é":"ê");
-      ObjectSetInteger(0,g_prefix+"DashIcon_"+rs,OBJPROP_COLOR,cc);
-      int bw=MathMax(1,(int)MathRound(40.0*si/100));
+      // 方向テキスト ▲/▼
+      ObjectSetString(0,g_prefix+"DashDir_"+rs,OBJPROP_TEXT,bull?"\x25B2":"\x25BC");
+      ObjectSetInteger(0,g_prefix+"DashDir_"+rs,OBJPROP_COLOR,cc);
+      // プログレスバー
+      int bw=MathMax(1,(int)MathRound(80.0*si/100));
       ObjectSetInteger(0,g_prefix+"DashBar_"+rs,OBJPROP_XSIZE,bw);
       ObjectSetInteger(0,g_prefix+"DashBar_"+rs,OBJPROP_BGCOLOR,cc);
       ObjectSetInteger(0,g_prefix+"DashBar_"+rs,OBJPROP_COLOR,cc);
