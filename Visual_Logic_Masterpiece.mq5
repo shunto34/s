@@ -1,10 +1,10 @@
 //+------------------------------------------------------------------+
 //| Visual_Logic_Masterpiece.mq5                                      |
-//| v3.0 - 高精度サイン + 利確TP + LINE/Email通知 + 洗練UI             |
+//| v4.0 - Liquidity Sweep + 三尊/逆三尊 + Push通知専用               |
 //+------------------------------------------------------------------+
-#property copyright "Visual Logic Masterpiece v3.0"
+#property copyright "Visual Logic Masterpiece v4.0"
 #property link      ""
-#property version   "3.00"
+#property version   "4.00"
 #property strict
 #property indicator_chart_window
 
@@ -77,24 +77,18 @@ input int    InpATRPeriod     = 14;
 input double InpCloudWidth    = 0.2;
 input double InpGlowWidth     = 0.35;
 
-input group "===== 反転サイン（星）設定 ====="
+input group "===== サイン精度設定 ====="
 input int    InpRSIPeriod     = 8;
-input int    InpRSIBuyLevel   = 25;
-input int    InpRSISellLevel  = 75;
 input int    InpBBPeriod      = 20;
-input double InpBBDeviation   = 2.5;
-input int    InpWPRPeriod     = 14;
-input double InpWPRBuyLevel   = -85.0;
-input double InpWPRSellLevel  = -15.0;
-input int    InpMinConditions = 3;       // 最小条件数（4条件中）
-
-input group "===== 継続サイン（矢印）設定 ====="
+input double InpBBDeviation   = 2.0;
 input int    InpADXPeriod     = 14;
-input double InpADXThreshold  = 20.0;
+input double InpADXThreshold  = 18.0;       // トレンド強度閾値（やや緩め）
+input int    InpSwingLookback = 20;          // スイングHL検出期間
+input int    InpHSLookback    = 30;          // 三尊/逆三尊検出期間
+input double InpSweepATRMult  = 0.3;        // Liquidity Sweepの閾値(ATR倍率)
 
 input group "===== 利確ターゲット設定 ====="
 input double InpTPMultiplier  = 2.0;
-input int    InpSwingLookback = 30;
 input color  InpTPColor       = C'0,255,100';
 
 input group "===== ダッシュボード設定 ====="
@@ -102,12 +96,10 @@ input color  InpBullColor     = C'0,170,255';
 input color  InpBearColor     = C'255,60,60';
 input int    InpDashFontSize  = 9;
 
-input group "===== 通知設定 ====="
-input bool   InpPushNotify    = false;    // プッシュ通知（MT5モバイル）
-input bool   InpEmailNotify   = false;    // メール通知
-input bool   InpLineNotify    = false;    // LINE通知
-input string InpLineToken     = "";       // LINE Notifyトークン
-input bool   InpAlertSound    = true;     // サウンドアラート
+input group "===== Push通知設定 ====="
+input bool   InpPushNotify    = false;       // プッシュ通知（MT5モバイル）
+input ENUM_TIMEFRAMES InpNotifyTF = PERIOD_M5; // 通知対象の時間足
+input bool   InpAlertSound    = true;        // サウンドアラート
 
 //+------------------------------------------------------------------+
 //| グローバル変数                                                      |
@@ -119,7 +111,7 @@ double g_buyStar[],    g_sellStar[];
 double g_buyTP[],      g_sellTP[];
 
 int g_handleFastEMA, g_handleSlowEMA, g_handleATR;
-int g_handleRSI, g_handleBBUpper, g_handleWPR, g_handleADX;
+int g_handleRSI, g_handleBBUpper, g_handleADX;
 
 int g_handleMTF_FastEMA[3], g_handleMTF_SlowEMA[3];
 int g_handleMTF_RSI[3], g_handleMTF_ADX[3];
@@ -127,7 +119,7 @@ int g_handleMTF_RSI[3], g_handleMTF_ADX[3];
 ENUM_TIMEFRAMES g_mtfPeriods[3] = {PERIOD_M5, PERIOD_M15, PERIOD_H1};
 string g_mtfLabels[3] = {"5m", "15m", "1h"};
 
-int    g_lastSignalDir = 0;
+int    g_lastSignalDir = 0;    // 0=なし, 1=買い, -1=売り
 bool   g_tpActive      = false;
 int    g_tpDir         = 0;
 double g_tpPrice       = 0;
@@ -152,12 +144,12 @@ int OnInit()
    SetIndexBuffer(8, g_buyTP,      INDICATOR_DATA);
    SetIndexBuffer(9, g_sellTP,     INDICATOR_DATA);
 
-   PlotIndexSetInteger(2, PLOT_ARROW, 233);
-   PlotIndexSetInteger(3, PLOT_ARROW, 234);
-   PlotIndexSetInteger(4, PLOT_ARROW, 171);
-   PlotIndexSetInteger(5, PLOT_ARROW, 171);
-   PlotIndexSetInteger(6, PLOT_ARROW, 174);
-   PlotIndexSetInteger(7, PLOT_ARROW, 174);
+   PlotIndexSetInteger(2, PLOT_ARROW, 233);  // 買い矢印
+   PlotIndexSetInteger(3, PLOT_ARROW, 234);  // 売り矢印
+   PlotIndexSetInteger(4, PLOT_ARROW, 171);  // 買い星
+   PlotIndexSetInteger(5, PLOT_ARROW, 171);  // 売り星
+   PlotIndexSetInteger(6, PLOT_ARROW, 174);  // 買いTP
+   PlotIndexSetInteger(7, PLOT_ARROW, 174);  // 売りTP
 
    for(int p = 2; p <= 7; p++)
       PlotIndexSetDouble(p, PLOT_EMPTY_VALUE, EMPTY_VALUE);
@@ -167,13 +159,11 @@ int OnInit()
    g_handleATR     = iATR(_Symbol, PERIOD_CURRENT, InpATRPeriod);
    g_handleRSI     = iRSI(_Symbol, PERIOD_CURRENT, InpRSIPeriod, PRICE_CLOSE);
    g_handleBBUpper = iBands(_Symbol, PERIOD_CURRENT, InpBBPeriod, 0, InpBBDeviation, PRICE_CLOSE);
-   g_handleWPR     = iWPR(_Symbol, PERIOD_CURRENT, InpWPRPeriod);
    g_handleADX     = iADX(_Symbol, PERIOD_CURRENT, InpADXPeriod);
 
    if(g_handleFastEMA==INVALID_HANDLE || g_handleSlowEMA==INVALID_HANDLE ||
       g_handleATR==INVALID_HANDLE || g_handleRSI==INVALID_HANDLE ||
-      g_handleBBUpper==INVALID_HANDLE || g_handleWPR==INVALID_HANDLE ||
-      g_handleADX==INVALID_HANDLE)
+      g_handleBBUpper==INVALID_HANDLE || g_handleADX==INVALID_HANDLE)
    {
       Print("エラー: ハンドル作成失敗");
       return(INIT_FAILED);
@@ -192,7 +182,7 @@ int OnInit()
 
    CreateUIElements();
    EventSetTimer(1);
-   IndicatorSetString(INDICATOR_SHORTNAME, "VLM v3");
+   IndicatorSetString(INDICATOR_SHORTNAME, "VLM v4");
    return(INIT_SUCCEEDED);
 }
 
@@ -204,8 +194,7 @@ void OnDeinit(const int reason)
    ObjectsDeleteAll(0, g_prefix);
    IndicatorRelease(g_handleFastEMA); IndicatorRelease(g_handleSlowEMA);
    IndicatorRelease(g_handleATR);     IndicatorRelease(g_handleRSI);
-   IndicatorRelease(g_handleBBUpper); IndicatorRelease(g_handleWPR);
-   IndicatorRelease(g_handleADX);
+   IndicatorRelease(g_handleBBUpper); IndicatorRelease(g_handleADX);
    for(int i=0;i<3;i++)
    {
       IndicatorRelease(g_handleMTF_FastEMA[i]); IndicatorRelease(g_handleMTF_SlowEMA[i]);
@@ -216,7 +205,7 @@ void OnDeinit(const int reason)
 }
 
 //+------------------------------------------------------------------+
-//| IsMTFAligned - MTF方向整合性チェック（v3新機能）                      |
+//| IsMTFAligned - MTF方向整合性チェック                                |
 //+------------------------------------------------------------------+
 bool IsMTFAligned(bool isBuy)
 {
@@ -230,6 +219,156 @@ bool IsMTFAligned(bool isBuy)
       if(!isBuy && fast[0] < slow[0]) alignCount++;
    }
    return (alignCount >= 2);
+}
+
+//+------------------------------------------------------------------+
+//| DetectLiquiditySweep - 流動性スイープ検出                           |
+//| 直近のスイングHL超え → 即座にリジェクト（ヒゲで戻る）                 |
+//+------------------------------------------------------------------+
+bool DetectLiquiditySweepBuy(const double &high[], const double &low[],
+                              const double &close[], const double &open[],
+                              double atrVal, int bar)
+{
+   if(bar < InpSwingLookback + 2) return false;
+
+   // 直近スイング安値を見つける
+   double swingLow = low[bar-1];
+   for(int j = bar - InpSwingLookback; j < bar - 1; j++)
+   {
+      if(j < 0) continue;
+      if(low[j] < swingLow) swingLow = low[j];
+   }
+
+   // 現在の足が直近安値を下抜け（sweep）してから戻った
+   double sweepThreshold = atrVal * InpSweepATRMult;
+   bool sweptBelow = (low[bar] < swingLow - sweepThreshold * 0.3);
+   bool closedAbove = (close[bar] > swingLow);
+   bool bullishClose = (close[bar] > open[bar]);  // 陽線で戻り
+
+   return (sweptBelow && closedAbove && bullishClose);
+}
+
+bool DetectLiquiditySweepSell(const double &high[], const double &low[],
+                               const double &close[], const double &open[],
+                               double atrVal, int bar)
+{
+   if(bar < InpSwingLookback + 2) return false;
+
+   double swingHigh = high[bar-1];
+   for(int j = bar - InpSwingLookback; j < bar - 1; j++)
+   {
+      if(j < 0) continue;
+      if(high[j] > swingHigh) swingHigh = high[j];
+   }
+
+   double sweepThreshold = atrVal * InpSweepATRMult;
+   bool sweptAbove = (high[bar] > swingHigh + sweepThreshold * 0.3);
+   bool closedBelow = (close[bar] < swingHigh);
+   bool bearishClose = (close[bar] < open[bar]);
+
+   return (sweptAbove && closedBelow && bearishClose);
+}
+
+//+------------------------------------------------------------------+
+//| DetectInverseHS - 逆三尊（Inverse Head & Shoulders）検出            |
+//| 買いシグナル: 安値3点で左肩 > 頭 < 右肩 のパターン                    |
+//+------------------------------------------------------------------+
+bool DetectInverseHS(const double &high[], const double &low[],
+                     const double &close[], int bar)
+{
+   if(bar < InpHSLookback + 5) return false;
+
+   int startBar = bar - InpHSLookback;
+   if(startBar < 0) startBar = 0;
+
+   // 検出範囲内の安値ピボット(3つ)を探す
+   double pivotLow[3];
+   int    pivotIdx[3];
+   int    pivotCount = 0;
+
+   for(int i = startBar + 2; i < bar - 1 && pivotCount < 3; i++)
+   {
+      if(i < 2) continue;
+      // 安値ピボット: 前2本と後2本より安い
+      bool isPivot = (low[i] < low[i-1] && low[i] < low[i-2]);
+      if(i + 2 < bar)
+         isPivot = isPivot && (low[i] < low[i+1] && low[i] < low[i+2]);
+      else if(i + 1 < bar)
+         isPivot = isPivot && (low[i] < low[i+1]);
+
+      if(isPivot)
+      {
+         pivotLow[pivotCount] = low[i];
+         pivotIdx[pivotCount] = i;
+         pivotCount++;
+      }
+   }
+
+   if(pivotCount < 3) return false;
+
+   // 最後の3ピボットで判定
+   double leftShoulder  = pivotLow[pivotCount-3];
+   double head          = pivotLow[pivotCount-2];
+   double rightShoulder = pivotLow[pivotCount-1];
+
+   // 逆三尊: 頭が最も安い、両肩は頭より高い
+   bool headIsLowest = (head < leftShoulder && head < rightShoulder);
+   // 両肩の高さがおおよそ同じ（差がスイング幅の40%以内）
+   double range = leftShoulder - head;
+   if(range <= 0) return false;
+   bool shouldersLevel = MathAbs(leftShoulder - rightShoulder) < range * 0.5;
+   // 右肩の後、価格が上に向かっている
+   bool breakingUp = (close[bar] > close[bar-1]) && (close[bar] > rightShoulder);
+
+   return (headIsLowest && shouldersLevel && breakingUp);
+}
+
+//+------------------------------------------------------------------+
+//| DetectHS - 三尊（Head & Shoulders）検出                             |
+//| 売りシグナル: 高値3点で左肩 < 頭 > 右肩 のパターン                    |
+//+------------------------------------------------------------------+
+bool DetectHS(const double &high[], const double &low[],
+              const double &close[], int bar)
+{
+   if(bar < InpHSLookback + 5) return false;
+
+   int startBar = bar - InpHSLookback;
+   if(startBar < 0) startBar = 0;
+
+   double pivotHigh[3];
+   int    pivotIdx[3];
+   int    pivotCount = 0;
+
+   for(int i = startBar + 2; i < bar - 1 && pivotCount < 3; i++)
+   {
+      if(i < 2) continue;
+      bool isPivot = (high[i] > high[i-1] && high[i] > high[i-2]);
+      if(i + 2 < bar)
+         isPivot = isPivot && (high[i] > high[i+1] && high[i] > high[i+2]);
+      else if(i + 1 < bar)
+         isPivot = isPivot && (high[i] > high[i+1]);
+
+      if(isPivot)
+      {
+         pivotHigh[pivotCount] = high[i];
+         pivotIdx[pivotCount] = i;
+         pivotCount++;
+      }
+   }
+
+   if(pivotCount < 3) return false;
+
+   double leftShoulder  = pivotHigh[pivotCount-3];
+   double head          = pivotHigh[pivotCount-2];
+   double rightShoulder = pivotHigh[pivotCount-1];
+
+   bool headIsHighest = (head > leftShoulder && head > rightShoulder);
+   double range = head - leftShoulder;
+   if(range <= 0) return false;
+   bool shouldersLevel = MathAbs(leftShoulder - rightShoulder) < range * 0.5;
+   bool breakingDown = (close[bar] < close[bar-1]) && (close[bar] < rightShoulder);
+
+   return (headIsHighest && shouldersLevel && breakingDown);
 }
 
 //+------------------------------------------------------------------+
@@ -274,10 +413,13 @@ double CalculateOptimalTP(bool isBuy, double entryPrice, double atrVal,
 }
 
 //+------------------------------------------------------------------+
-//| SendSignalAlert - 全チャネル通知送信（v3新機能）                      |
+//| SendSignalAlert - Push通知送信（v4: Push専用）                      |
 //+------------------------------------------------------------------+
 void SendSignalAlert(string signalType, string direction, double price, double tpPrice)
 {
+   // 通知対象の時間足チェック
+   if(Period() != InpNotifyTF) return;
+
    string tf = EnumToString(Period());
    StringReplace(tf, "PERIOD_", "");
    string msg = StringFormat("[%s] %s %s @ %s | TP: %s | %s %s",
@@ -306,50 +448,11 @@ void SendSignalAlert(string signalType, string direction, double price, double t
    if(InpPushNotify)
       SendNotification(msg);
 
-   // メール
-   if(InpEmailNotify)
-      SendMail("VLM Signal: " + direction + " " + _Symbol, msg);
-
-   // LINE Notify
-   if(InpLineNotify && InpLineToken != "")
-      SendLineNotify(msg);
-
    Print("Signal Alert: ", msg);
 }
 
 //+------------------------------------------------------------------+
-//| SendLineNotify - LINE通知送信                                       |
-//+------------------------------------------------------------------+
-bool SendLineNotify(string message)
-{
-   string url = "https://notify-api.line.me/api/notify";
-   string headers = "Authorization: Bearer " + InpLineToken + "\r\n"
-                  + "Content-Type: application/x-www-form-urlencoded\r\n";
-
-   char post[], result[];
-   string resultHeaders;
-   string data = "message=" + message;
-
-   int len = StringToCharArray(data, post, 0, WHOLE_ARRAY, CP_UTF8);
-   if(len > 0) ArrayResize(post, len - 1);
-
-   ResetLastError();
-   int res = WebRequest("POST", url, headers, 5000, post, result, resultHeaders);
-
-   if(res == -1)
-   {
-      int err = GetLastError();
-      if(err == 4014)
-         Print("LINE通知: WebRequest未許可。ツール→オプション→EA で https://notify-api.line.me を追加してください");
-      else
-         Print("LINE通知エラー: ", err);
-      return false;
-   }
-   return true;
-}
-
-//+------------------------------------------------------------------+
-//| OnCalculate - メインループ（v3: 高精度フィルター付き）                 |
+//| OnCalculate - メインループ（v4: Liquidity Sweep + 三尊/逆三尊）      |
 //+------------------------------------------------------------------+
 int OnCalculate(const int rates_total,
                 const int prev_calculated,
@@ -374,7 +477,7 @@ int OnCalculate(const int rates_total,
 
    double fastEMA[], slowEMA[], atr[];
    double rsi[], bbUpper[], bbLower[], bbMiddle[];
-   double wpr[], adxMain[], adxPlus[], adxMinus[];
+   double adxMain[], adxPlus[], adxMinus[];
 
    int startBar = (prev_calculated > 1) ? prev_calculated - 1 : 0;
 
@@ -385,7 +488,6 @@ int OnCalculate(const int rates_total,
    if(CopyBuffer(g_handleBBUpper,1,0,rates_total,bbUpper)<=0) return(0);
    if(CopyBuffer(g_handleBBUpper,2,0,rates_total,bbLower)<=0) return(0);
    if(CopyBuffer(g_handleBBUpper,0,0,rates_total,bbMiddle)<=0)return(0);
-   if(CopyBuffer(g_handleWPR,    0,0,rates_total,wpr)    <=0) return(0);
    if(CopyBuffer(g_handleADX,    0,0,rates_total,adxMain)<=0) return(0);
    if(CopyBuffer(g_handleADX,    1,0,rates_total,adxPlus)<=0) return(0);
    if(CopyBuffer(g_handleADX,    2,0,rates_total,adxMinus)<=0)return(0);
@@ -395,6 +497,7 @@ int OnCalculate(const int rates_total,
       if(i < InpSlowEMA + 5) continue;
 
       double atrVal = atr[i];
+      if(atrVal <= 0) continue;
       bool isBull = (fastEMA[i] > slowEMA[i]);
 
       //=== クラウド ===
@@ -414,100 +517,142 @@ int OnCalculate(const int rates_total,
          { g_sellTP[i]=g_tpPrice; g_tpActive=false; }
       }
 
-      //=== 星サイン（反転） v3: ローソク足確認+事前トレンド追加 ===
-      g_buyStar[i] = EMPTY_VALUE;
+      //=== 初期化 ===
+      g_buyStar[i]  = EMPTY_VALUE;
       g_sellStar[i] = EMPTY_VALUE;
+      g_buyArrow[i]  = EMPTY_VALUE;
+      g_sellArrow[i] = EMPTY_VALUE;
 
-      if(i >= 5)
+      if(i < InpHSLookback + 5) continue;
+
+      //=== Liquidity Sweep検出 ===
+      bool sweepBuy  = DetectLiquiditySweepBuy(high, low, close, open, atrVal, i);
+      bool sweepSell = DetectLiquiditySweepSell(high, low, close, open, atrVal, i);
+
+      //=== 三尊/逆三尊検出 ===
+      bool invHS = DetectInverseHS(high, low, close, i);  // 買いパターン
+      bool hs    = DetectHS(high, low, close, i);          // 売りパターン
+
+      //=== RSIダイバージェンス補助 ===
+      bool rsiBuyZone  = (rsi[i] < 45);  // 売られ過ぎ寄り
+      bool rsiSellZone = (rsi[i] > 55);  // 買われ過ぎ寄り
+      // RSIが反転し始めている
+      bool rsiTurningUp   = (i >= 2 && rsi[i] > rsi[i-1] && rsi[i-1] <= rsi[i-2]);
+      bool rsiTurningDown = (i >= 2 && rsi[i] < rsi[i-1] && rsi[i-1] >= rsi[i-2]);
+
+      //=== ADX+DI方向 ===
+      bool adxActive = (adxMain[i] > InpADXThreshold);
+      bool diLong    = (adxPlus[i] > adxMinus[i]);
+      bool diShort   = (adxMinus[i] > adxPlus[i]);
+
+      // ================================================================
+      // 星サイン（反転）: Liquidity Sweep + 三尊/逆三尊 + RSI確認
+      //   最強シグナル: sweep AND パターン
+      //   通常シグナル: sweep OR パターン（+ RSIターン確認）
+      // ================================================================
+
+      double starOff = atrVal * 0.5;
+
+      // --- 買い星（反転買い）---
+      if(g_lastSignalDir != 1)
       {
-         int buyCnt=0, sellCnt=0;
+         bool candleOK = (close[i] > open[i]);  // 陽線
 
-         if(rsi[i]>InpRSIBuyLevel && rsi[i-1]<=InpRSIBuyLevel) buyCnt++;
-         if(low[i]<=bbLower[i]) buyCnt++;
-         if(wpr[i]<InpWPRBuyLevel) buyCnt++;
-         if(low[i-1]<=low[i-2] && low[i-1]<=low[i]) buyCnt++;
+         // Tier1: Sweep + 逆三尊 → 最強（追加条件不要）
+         bool tier1Buy = (sweepBuy && invHS && candleOK);
 
-         if(rsi[i]<InpRSISellLevel && rsi[i-1]>=InpRSISellLevel) sellCnt++;
-         if(high[i]>=bbUpper[i]) sellCnt++;
-         if(wpr[i]>InpWPRSellLevel) sellCnt++;
-         if(high[i-1]>=high[i-2] && high[i-1]>=high[i]) sellCnt++;
+         // Tier2: Sweep + RSI反転 → 強め
+         bool tier2Buy = (sweepBuy && rsiBuyZone && rsiTurningUp && candleOK);
 
-         double starOff = atrVal * 0.5;
+         // Tier3: 逆三尊 + RSI反転 + クラウド下方 → 中程度
+         bool tier3Buy = (invHS && rsiTurningUp && close[i] < g_cloudUpper[i] && candleOK);
 
-         // v3: 買い星 - 陽線確認 + 事前下落確認
-         if(buyCnt >= InpMinConditions && g_lastSignalDir != 1)
+         // Tier4: Sweep単独 + BB下限タッチ + 陽線 → 標準
+         bool tier4Buy = (sweepBuy && low[i] <= bbLower[i] && candleOK);
+
+         if(tier1Buy || tier2Buy || tier3Buy || tier4Buy)
          {
-            bool candleOK = (close[i] > open[i]);        // 陽線
-            bool priorDown = (close[i] < close[i-5]);    // 直近5本で下落
-            if(candleOK && priorDown)
-            {
-               g_buyStar[i] = low[i] - starOff;
-               g_lastSignalDir = 1;
-               g_tpActive=true; g_tpDir=1;
-               g_tpPrice = CalculateOptimalTP(true,close[i],atrVal,high,low,bbUpper[i],bbLower[i],i,InpSwingLookback);
-               if(i==rates_total-1 && prev_calculated>0 && time[i]>g_lastNotifyTime)
-               { g_lastNotifyTime=time[i]; SendSignalAlert("Star","BUY",close[i],g_tpPrice); }
-            }
-         }
-         // v3: 売り星 - 陰線確認 + 事前上昇確認
-         else if(sellCnt >= InpMinConditions && g_lastSignalDir != -1)
-         {
-            bool candleOK = (close[i] < open[i]);        // 陰線
-            bool priorUp = (close[i] > close[i-5]);      // 直近5本で上昇
-            if(candleOK && priorUp)
-            {
-               g_sellStar[i] = high[i] + starOff;
-               g_lastSignalDir = -1;
-               g_tpActive=true; g_tpDir=-1;
-               g_tpPrice = CalculateOptimalTP(false,close[i],atrVal,high,low,bbUpper[i],bbLower[i],i,InpSwingLookback);
-               if(i==rates_total-1 && prev_calculated>0 && time[i]>g_lastNotifyTime)
-               { g_lastNotifyTime=time[i]; SendSignalAlert("Star","SELL",close[i],g_tpPrice); }
-            }
+            g_buyStar[i] = low[i] - starOff;
+            g_lastSignalDir = 1;
+            g_tpActive = true; g_tpDir = 1;
+            g_tpPrice = CalculateOptimalTP(true, close[i], atrVal, high, low,
+                                            bbUpper[i], bbLower[i], i, InpSwingLookback);
+            if(i == rates_total-1 && prev_calculated > 0 && time[i] > g_lastNotifyTime)
+            { g_lastNotifyTime = time[i]; SendSignalAlert("Star","BUY",close[i],g_tpPrice); }
          }
       }
 
-      //=== 矢印サイン（継続） v3: DI方向+MTF整合+厳格プルバック ===
-      g_buyArrow[i] = EMPTY_VALUE;
-      g_sellArrow[i] = EMPTY_VALUE;
+      // --- 売り星（反転売り）---
+      if(g_lastSignalDir != -1 && g_buyStar[i] == EMPTY_VALUE)
+      {
+         bool candleOK = (close[i] < open[i]);  // 陰線
 
-      if(i >= 2)
+         bool tier1Sell = (sweepSell && hs && candleOK);
+         bool tier2Sell = (sweepSell && rsiSellZone && rsiTurningDown && candleOK);
+         bool tier3Sell = (hs && rsiTurningDown && close[i] > g_cloudLower[i] && candleOK);
+         bool tier4Sell = (sweepSell && high[i] >= bbUpper[i] && candleOK);
+
+         if(tier1Sell || tier2Sell || tier3Sell || tier4Sell)
+         {
+            g_sellStar[i] = high[i] + starOff;
+            g_lastSignalDir = -1;
+            g_tpActive = true; g_tpDir = -1;
+            g_tpPrice = CalculateOptimalTP(false, close[i], atrVal, high, low,
+                                            bbUpper[i], bbLower[i], i, InpSwingLookback);
+            if(i == rates_total-1 && prev_calculated > 0 && time[i] > g_lastNotifyTime)
+            { g_lastNotifyTime = time[i]; SendSignalAlert("Star","SELL",close[i],g_tpPrice); }
+         }
+      }
+
+      // ================================================================
+      // 矢印サイン（トレンド継続）: クラウドブレイク + ADX + MTF整合
+      //   v4: 条件を少し緩めてサイン数を増やしつつ、
+      //       MTF整合で逆行を防ぐ
+      // ================================================================
+
+      if(i >= 2 && g_buyStar[i] == EMPTY_VALUE && g_sellStar[i] == EMPTY_VALUE)
       {
          double arrowOff = atrVal * 0.3;
 
-         // v3 買い矢印: 全条件がANDで結合
+         // 買い矢印: クラウド上ブレイク + トレンド + MTF整合
          bool buyOK = isBull
-            && close[i] > g_cloudUpper[i]               // クラウド上にブレイク
-            && adxMain[i] > InpADXThreshold              // トレンド強度
-            && adxPlus[i] > adxMinus[i]                  // v3: +DI > -DI（方向一致）
-            && low[i-1] <= g_cloudUpper[i-1]             // v3: クラウドに実際タッチ
-            && close[i] > close[i-1]                     // 陽線
-            && IsMTFAligned(true);                       // v3: MTF2/3以上一致
+            && close[i] > g_cloudUpper[i]                // クラウド上にブレイク
+            && adxActive                                  // トレンド存在
+            && diLong                                     // +DI方向一致
+            && (low[i-1] <= g_cloudUpper[i-1]             // プルバックあり
+                || low[i-2] <= g_cloudUpper[i-2])         // v4: 2本前まで許容
+            && close[i] > close[i-1]                      // 陽線
+            && IsMTFAligned(true);                        // MTF整合
 
+         // 売り矢印
          bool sellOK = !isBull
             && close[i] < g_cloudLower[i]
-            && adxMain[i] > InpADXThreshold
-            && adxMinus[i] > adxPlus[i]                  // v3: -DI > +DI
-            && high[i-1] >= g_cloudLower[i-1]            // v3: クラウドに実際タッチ
+            && adxActive
+            && diShort
+            && (high[i-1] >= g_cloudLower[i-1]
+                || high[i-2] >= g_cloudLower[i-2])        // v4: 2本前まで許容
             && close[i] < close[i-1]
-            && IsMTFAligned(false);                      // v3: MTF整合
+            && IsMTFAligned(false);
 
          if(buyOK && g_lastSignalDir != 1)
          {
             g_buyArrow[i] = low[i] - arrowOff;
             g_lastSignalDir = 1;
-            g_tpActive=true; g_tpDir=1;
-            g_tpPrice = CalculateOptimalTP(true,close[i],atrVal,high,low,bbUpper[i],bbLower[i],i,InpSwingLookback);
-            if(i==rates_total-1 && prev_calculated>0 && time[i]>g_lastNotifyTime)
-            { g_lastNotifyTime=time[i]; SendSignalAlert("Arrow","BUY",close[i],g_tpPrice); }
+            g_tpActive = true; g_tpDir = 1;
+            g_tpPrice = CalculateOptimalTP(true, close[i], atrVal, high, low,
+                                            bbUpper[i], bbLower[i], i, InpSwingLookback);
+            if(i == rates_total-1 && prev_calculated > 0 && time[i] > g_lastNotifyTime)
+            { g_lastNotifyTime = time[i]; SendSignalAlert("Arrow","BUY",close[i],g_tpPrice); }
          }
          else if(sellOK && g_lastSignalDir != -1)
          {
             g_sellArrow[i] = high[i] + arrowOff;
             g_lastSignalDir = -1;
-            g_tpActive=true; g_tpDir=-1;
-            g_tpPrice = CalculateOptimalTP(false,close[i],atrVal,high,low,bbUpper[i],bbLower[i],i,InpSwingLookback);
-            if(i==rates_total-1 && prev_calculated>0 && time[i]>g_lastNotifyTime)
-            { g_lastNotifyTime=time[i]; SendSignalAlert("Arrow","SELL",close[i],g_tpPrice); }
+            g_tpActive = true; g_tpDir = -1;
+            g_tpPrice = CalculateOptimalTP(false, close[i], atrVal, high, low,
+                                            bbUpper[i], bbLower[i], i, InpSwingLookback);
+            if(i == rates_total-1 && prev_calculated > 0 && time[i] > g_lastNotifyTime)
+            { g_lastNotifyTime = time[i]; SendSignalAlert("Arrow","SELL",close[i],g_tpPrice); }
          }
       }
    }
@@ -602,11 +747,11 @@ void UpdateTPInfo()
 }
 
 //+------------------------------------------------------------------+
-//| CreateUIElements - v3: コンパクト&洗練デザイン                       |
+//| CreateUIElements - v4: コンパクトUI                                 |
 //+------------------------------------------------------------------+
 void CreateUIElements()
 {
-   int x0 = 10;  // 左端基準
+   int x0 = 10;
 
    //=== トレンドボックス ===
    string box = g_prefix+"TrendBox";
@@ -622,12 +767,10 @@ void CreateUIElements()
    ObjectSetInteger(0,box,OBJPROP_WIDTH,2);
    ObjectSetInteger(0,box,OBJPROP_BACK,false);
 
-   // 矢印（18pt でボックス内に確実に収まる）
    MakeLabel(g_prefix+"TrendArrow","é",x0+16,28,clrWhite,"Wingdings",18,CORNER_LEFT_UPPER);
-   // ON表示
    MakeLabel(g_prefix+"OnOffLabel","ON",x0+34,47,C'0,255,100',"Arial Bold",7,CORNER_LEFT_UPPER);
 
-   //=== ボタン（48px幅、18px高、ボックスと同幅） ===
+   //=== ボタン ===
    int by = 64;
    MakeButton(g_prefix+"Btn1m",   "1m", x0, by,      48, 18);
    MakeButton(g_prefix+"Btn5m",   "5m", x0, by+20,   48, 18);
@@ -661,7 +804,6 @@ void CreateUIElements()
       MakeLabel(g_prefix+"DashScore_"+IntegerToString(i), "50",   60,yB,clrWhite,"Arial Bold",InpDashFontSize+1,CORNER_LEFT_LOWER);
       MakeLabel(g_prefix+"DashIcon_"+IntegerToString(i),  "é",   105,yB,InpBullColor,"Wingdings",InpDashFontSize+3,CORNER_LEFT_LOWER);
 
-      // スコアバー背景
       string bbg = g_prefix+"DashBarBG_"+IntegerToString(i);
       ObjectCreate(0,bbg,OBJ_RECTANGLE_LABEL,0,0,0);
       ObjectSetInteger(0,bbg,OBJPROP_CORNER,CORNER_LEFT_LOWER);
