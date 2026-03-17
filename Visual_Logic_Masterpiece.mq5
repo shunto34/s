@@ -876,6 +876,19 @@ void CreateUIElements()
       MakeLabel(g_prefix+"DashDir_"+si, "\xEA",
                 tblX + colArrW/2 + 4, textY + 1,
                 clrWhite, "Wingdings", 22, CORNER_RIGHT_LOWER);
+
+      // --- プログレスバー（スコアセル下部）---
+      int barH = 4;
+      int barMaxW = colScW - 8;
+      int barY = rowTopY - rowH + 6;
+      // バー背景（暗い）
+      MakeRect(g_prefix+"BarBG_"+si,
+               tblX + colArrW + 4, barY, barMaxW, barH,
+               C'15,18,28', C'15,18,28', 0, CORNER_RIGHT_LOWER);
+      // バー本体（スコアに応じて幅変化）
+      MakeRect(g_prefix+"Bar_"+si,
+               tblX + colArrW + 4, barY, barMaxW / 2, barH,
+               InpBullColor, InpBullColor, 0, CORNER_RIGHT_LOWER);
    }
 
    ChartRedraw();
@@ -955,6 +968,14 @@ void UpdateDashboard()
       // 丸い矢印アイコン（背景色 + Wingdings矢印）
       ObjectSetInteger(0,g_prefix+"DashCircle_"+rs,OBJPROP_BGCOLOR,cc);
       ObjectSetString(0,g_prefix+"DashDir_"+rs,OBJPROP_TEXT,bull?"\xE9":"\xEA");
+
+      // プログレスバー更新
+      int barMaxW = 65 - 8;  // colScW - 8
+      int barW = (int)MathRound(barMaxW * si / 100.0);
+      if(barW < 2) barW = 2;
+      ObjectSetInteger(0,g_prefix+"Bar_"+rs,OBJPROP_XSIZE,barW);
+      ObjectSetInteger(0,g_prefix+"Bar_"+rs,OBJPROP_BGCOLOR,cc);
+      ObjectSetInteger(0,g_prefix+"Bar_"+rs,OBJPROP_COLOR,cc);
    }
    ChartRedraw();
 }
