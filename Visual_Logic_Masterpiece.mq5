@@ -120,6 +120,7 @@ ENUM_TIMEFRAMES g_mtfPeriods[3] = {PERIOD_M5, PERIOD_M15, PERIOD_H1};
 string g_mtfLabels[3] = {"5m", "15m", "1h"};
 
 int    g_lastSignalDir = 0;    // 0=なし, 1=買い, -1=売り
+int    g_lastStarBar   = 0;   // 星シグナルのクールダウン用
 bool   g_tpActive      = false;
 int    g_tpDir         = 0;
 double g_tpPrice       = 0;
@@ -554,26 +555,27 @@ int OnCalculate(const int rates_total,
       double starOff = atrVal * 0.5;
 
       // --- 買い星（反転買い）---
-      if(g_lastSignalDir != 1)
+      bool starCooldownOK = (i - g_lastStarBar >= 5);
+      if(starCooldownOK)
       {
          bool candleOK = (close[i] > open[i]);  // 陽線
+         bool atExtreme = (low[i] <= bbLower[i] || close[i] < g_cloudLower[i]);
 
-         // Tier1: Sweep + 逆三尊 → 最強（追加条件不要）
-         bool tier1Buy = (sweepBuy && invHS && candleOK);
+         // ボーナス: Sweep/逆三尊検出時はRSI条件を緩和
+         bool hasBonus = (sweepBuy || invHS);
+         bool rsiOK = hasBonus ? (rsi[i] < 50) : (rsi[i] < 40);
 
-         // Tier2: Sweep + RSI反転 → 強め
-         bool tier2Buy = (sweepBuy && rsiBuyZone && rsiTurningUp && candleOK);
+         // Tier判定（表示サイズ用）
+         int buyStarTier = 0;
+         if(sweepBuy && invHS && candleOK) buyStarTier = 1;           // Tier1: 最強
+         else if(rsiOK && rsiTurningUp && candleOK && atExtreme) buyStarTier = 2;  // Tier2: 標準
 
-         // Tier3: 逆三尊 + RSI反転 + クラウド下方 → 中程度
-         bool tier3Buy = (invHS && rsiTurningUp && close[i] < g_cloudUpper[i] && candleOK);
-
-         // Tier4: Sweep単独 + BB下限タッチ + 陽線 → 標準
-         bool tier4Buy = (sweepBuy && low[i] <= bbLower[i] && candleOK);
-
-         if(tier1Buy || tier2Buy || tier3Buy || tier4Buy)
+         if(buyStarTier > 0)
          {
-            g_buyStar[i] = low[i] - starOff;
+            double tierOff = (buyStarTier == 1) ? starOff * 1.5 : starOff;
+            g_buyStar[i] = low[i] - tierOff;
             g_lastSignalDir = 1;
+            g_lastStarBar = i;
             g_tpActive = true; g_tpDir = 1;
             g_tpPrice = CalculateOptimalTP(true, close[i], atrVal, high, low,
                                             bbUpper[i], bbLower[i], i, InpSwingLookback);
@@ -583,19 +585,24 @@ int OnCalculate(const int rates_total,
       }
 
       // --- 売り星（反転売り）---
-      if(g_lastSignalDir != -1 && g_buyStar[i] == EMPTY_VALUE)
+      if(starCooldownOK && g_buyStar[i] == EMPTY_VALUE)
       {
          bool candleOK = (close[i] < open[i]);  // 陰線
+         bool atExtreme = (high[i] >= bbUpper[i] || close[i] > g_cloudUpper[i]);
 
-         bool tier1Sell = (sweepSell && hs && candleOK);
-         bool tier2Sell = (sweepSell && rsiSellZone && rsiTurningDown && candleOK);
-         bool tier3Sell = (hs && rsiTurningDown && close[i] > g_cloudLower[i] && candleOK);
-         bool tier4Sell = (sweepSell && high[i] >= bbUpper[i] && candleOK);
+         bool hasBonus = (sweepSell || hs);
+         bool rsiOK = hasBonus ? (rsi[i] > 50) : (rsi[i] > 60);
 
-         if(tier1Sell || tier2Sell || tier3Sell || tier4Sell)
+         int sellStarTier = 0;
+         if(sweepSell && hs && candleOK) sellStarTier = 1;
+         else if(rsiOK && rsiTurningDown && candleOK && atExtreme) sellStarTier = 2;
+
+         if(sellStarTier > 0)
          {
-            g_sellStar[i] = high[i] + starOff;
+            double tierOff = (sellStarTier == 1) ? starOff * 1.5 : starOff;
+            g_sellStar[i] = high[i] + tierOff;
             g_lastSignalDir = -1;
+            g_lastStarBar = i;
             g_tpActive = true; g_tpDir = -1;
             g_tpPrice = CalculateOptimalTP(false, close[i], atrVal, high, low,
                                             bbUpper[i], bbLower[i], i, InpSwingLookback);
@@ -605,54 +612,33 @@ int OnCalculate(const int rates_total,
       }
 
       // ================================================================
-      // 矢印サイン（トレンド継続）: クラウドブレイク + ADX + MTF整合
-      //   v4: 条件を少し緩めてサイン数を増やしつつ、
-      //       MTF整合で逆行を防ぐ
+      // 矢印サイン（トレンド継続）: EMA方向 + ADX + DI
+      //   描画のみ（TP更新・通知なし）
       // ================================================================
 
-      if(i >= 2 && g_buyStar[i] == EMPTY_VALUE && g_sellStar[i] == EMPTY_VALUE)
+      if(i >= 2)
       {
          double arrowOff = atrVal * 0.3;
 
-         // 買い矢印: クラウド上ブレイク + トレンド + MTF整合
+         // 買い矢印: EMA方向 + slowEMAの上 + ADX + DI
          bool buyOK = isBull
-            && close[i] > g_cloudUpper[i]                // クラウド上にブレイク
-            && adxActive                                  // トレンド存在
-            && diLong                                     // +DI方向一致
-            && (low[i-1] <= g_cloudUpper[i-1]             // プルバックあり
-                || low[i-2] <= g_cloudUpper[i-2])         // v4: 2本前まで許容
-            && close[i] > close[i-1]                      // 陽線
-            && IsMTFAligned(true);                        // MTF整合
+            && close[i] > slowEMA[i]              // 遅いEMAの上（クラウド内でもOK）
+            && adxActive                          // トレンド存在
+            && diLong;                            // +DI方向一致
 
-         // 売り矢印
+         // 売り矢印: EMA方向 + slowEMAの下 + ADX + DI
          bool sellOK = !isBull
-            && close[i] < g_cloudLower[i]
+            && close[i] < slowEMA[i]              // 遅いEMAの下
             && adxActive
-            && diShort
-            && (high[i-1] >= g_cloudLower[i-1]
-                || high[i-2] >= g_cloudLower[i-2])        // v4: 2本前まで許容
-            && close[i] < close[i-1]
-            && IsMTFAligned(false);
+            && diShort;
 
-         if(buyOK && g_lastSignalDir != 1)
+         if(buyOK)
          {
             g_buyArrow[i] = low[i] - arrowOff;
-            g_lastSignalDir = 1;
-            g_tpActive = true; g_tpDir = 1;
-            g_tpPrice = CalculateOptimalTP(true, close[i], atrVal, high, low,
-                                            bbUpper[i], bbLower[i], i, InpSwingLookback);
-            if(i == rates_total-1 && prev_calculated > 0 && time[i] > g_lastNotifyTime)
-            { g_lastNotifyTime = time[i]; SendSignalAlert("Arrow","BUY",close[i],g_tpPrice); }
          }
-         else if(sellOK && g_lastSignalDir != -1)
+         else if(sellOK)
          {
             g_sellArrow[i] = high[i] + arrowOff;
-            g_lastSignalDir = -1;
-            g_tpActive = true; g_tpDir = -1;
-            g_tpPrice = CalculateOptimalTP(false, close[i], atrVal, high, low,
-                                            bbUpper[i], bbLower[i], i, InpSwingLookback);
-            if(i == rates_total-1 && prev_calculated > 0 && time[i] > g_lastNotifyTime)
-            { g_lastNotifyTime = time[i]; SendSignalAlert("Arrow","SELL",close[i],g_tpPrice); }
          }
       }
    }
