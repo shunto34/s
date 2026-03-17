@@ -8,8 +8,8 @@
 #property strict
 #property indicator_chart_window
 
-#property indicator_buffers 10
-#property indicator_plots   8
+#property indicator_buffers 11
+#property indicator_plots   9
 
 //--- Plot 1: クラウド本体
 #property indicator_label1  "CloudUpper;CloudLower"
@@ -67,6 +67,13 @@
 #property indicator_style8  STYLE_SOLID
 #property indicator_width8  3
 
+//--- Plot 9: 砂時計（様子見）
+#property indicator_label9  "Hourglass"
+#property indicator_type9   DRAW_ARROW
+#property indicator_color9  C'255,165,0'
+#property indicator_style9  STYLE_SOLID
+#property indicator_width9  3
+
 //+------------------------------------------------------------------+
 //| 入力パラメーター                                                    |
 //+------------------------------------------------------------------+
@@ -86,6 +93,7 @@ input double InpADXThreshold  = 18.0;       // トレンド強度閾値（やや
 input int    InpSwingLookback = 20;          // スイングHL検出期間
 input int    InpHSLookback    = 30;          // 三尊/逆三尊検出期間
 input double InpSweepATRMult  = 0.3;        // Liquidity Sweepの閾値(ATR倍率)
+input double InpHourglassADX = 15.0;        // 砂時計ADX閾値（低トレンド判定）
 
 input group "===== 利確ターゲット設定 ====="
 input double InpTPMultiplier  = 2.0;
@@ -109,6 +117,7 @@ double g_glowUpper[],  g_glowLower[];
 double g_buyArrow[],   g_sellArrow[];
 double g_buyStar[],    g_sellStar[];
 double g_buyTP[],      g_sellTP[];
+double g_hourglass[];
 
 int g_handleFastEMA, g_handleSlowEMA, g_handleATR;
 int g_handleRSI, g_handleBBUpper, g_handleADX;
@@ -121,6 +130,7 @@ string g_mtfLabels[3] = {"5m", "15m", "1h"};
 
 int    g_lastSignalDir = 0;    // 0=なし, 1=買い, -1=売り
 int    g_lastStarBar   = 0;   // 星シグナルのクールダウン用
+int    g_lastHourglassBar = 0; // 砂時計クールダウン用
 bool   g_tpActive      = false;
 int    g_tpDir         = 0;
 double g_tpPrice       = 0;
@@ -144,6 +154,7 @@ int OnInit()
    SetIndexBuffer(7, g_sellStar,   INDICATOR_DATA);
    SetIndexBuffer(8, g_buyTP,      INDICATOR_DATA);
    SetIndexBuffer(9, g_sellTP,     INDICATOR_DATA);
+   SetIndexBuffer(10, g_hourglass, INDICATOR_DATA);
 
    PlotIndexSetInteger(2, PLOT_ARROW, 233);  // 買い矢印
    PlotIndexSetInteger(3, PLOT_ARROW, 234);  // 売り矢印
@@ -151,8 +162,9 @@ int OnInit()
    PlotIndexSetInteger(5, PLOT_ARROW, 171);  // 売り星
    PlotIndexSetInteger(6, PLOT_ARROW, 174);  // 買いTP
    PlotIndexSetInteger(7, PLOT_ARROW, 174);  // 売りTP
+   PlotIndexSetInteger(8, PLOT_ARROW, 116);  // 砂時計（◆ダイヤモンド）
 
-   for(int p = 2; p <= 7; p++)
+   for(int p = 2; p <= 8; p++)
       PlotIndexSetDouble(p, PLOT_EMPTY_VALUE, EMPTY_VALUE);
 
    g_handleFastEMA = iMA(_Symbol, PERIOD_CURRENT, InpFastEMA, 0, MODE_EMA, PRICE_CLOSE);
@@ -474,6 +486,7 @@ int OnCalculate(const int rates_total,
       g_tpActive = false;
       g_tpPrice = 0;
       g_tpDir = 0;
+      g_lastHourglassBar = 0;
    }
 
    double fastEMA[], slowEMA[], atr[];
@@ -523,6 +536,7 @@ int OnCalculate(const int rates_total,
       g_sellStar[i] = EMPTY_VALUE;
       g_buyArrow[i]  = EMPTY_VALUE;
       g_sellArrow[i] = EMPTY_VALUE;
+      g_hourglass[i] = EMPTY_VALUE;
 
       if(i < InpHSLookback + 5) continue;
 
@@ -641,6 +655,36 @@ int OnCalculate(const int rates_total,
             g_sellArrow[i] = high[i] + arrowOff;
          }
       }
+
+      // ================================================================
+      // 砂時計サイン（様子見/コンソリデーション）
+      //   条件: クラウド内 + 低ADX + RSI中立ゾーン
+      //   矢印/星が出ている足では出さない（シグナル競合防止）
+      // ================================================================
+      if(i >= 2)
+      {
+         bool hgCooldownOK = (i - g_lastHourglassBar >= 5);
+         if(hgCooldownOK && g_buyArrow[i] == EMPTY_VALUE && g_sellArrow[i] == EMPTY_VALUE
+            && g_buyStar[i] == EMPTY_VALUE && g_sellStar[i] == EMPTY_VALUE)
+         {
+            bool insideCloud = (close[i] <= g_cloudUpper[i] && close[i] >= g_cloudLower[i]);
+            bool weakTrend = (adxMain[i] < InpHourglassADX);
+            bool rsiNeutral = (rsi[i] >= 40.0 && rsi[i] <= 60.0);
+            bool emaConverged = false;
+            if(slowEMA[i] != 0)
+               emaConverged = (MathAbs(fastEMA[i] - slowEMA[i]) / slowEMA[i] * 10000.0 < 5.0);
+
+            bool showHG = (insideCloud && weakTrend && rsiNeutral)
+                        || (emaConverged && weakTrend && rsiNeutral)
+                        || (insideCloud && emaConverged && weakTrend);
+
+            if(showHG)
+            {
+               g_hourglass[i] = close[i];
+               g_lastHourglassBar = i;
+            }
+         }
+      }
    }
 
    ManageTPLine();
@@ -650,7 +694,7 @@ int OnCalculate(const int rates_total,
    {
       g_lastDashBar = rates_total;
       UpdateDashboard();
-      UpdateTrendPanel(fastEMA[rates_total-1] > slowEMA[rates_total-1]);
+      UpdateTrendPanel(GetMTFTrendState());
    }
 
    return(rates_total);
@@ -677,11 +721,11 @@ void OnChartEvent(const int id, const long &lparam,
       {
          PlotIndexSetInteger(0,PLOT_DRAW_TYPE,DRAW_FILLING);
          PlotIndexSetInteger(1,PLOT_DRAW_TYPE,DRAW_FILLING);
-         for(int p=2;p<=7;p++) PlotIndexSetInteger(p,PLOT_DRAW_TYPE,DRAW_ARROW);
+         for(int p=2;p<=8;p++) PlotIndexSetInteger(p,PLOT_DRAW_TYPE,DRAW_ARROW);
       }
       else
       {
-         for(int p=0;p<=7;p++) PlotIndexSetInteger(p,PLOT_DRAW_TYPE,DRAW_NONE);
+         for(int p=0;p<=8;p++) PlotIndexSetInteger(p,PLOT_DRAW_TYPE,DRAW_NONE);
          ObjectDelete(0,g_prefix+"TPLine");
       }
       ChartRedraw();
@@ -782,15 +826,15 @@ void MakeButtonCorner(string name,string text,int x,int y,int w,int h,
 void CreateUIElements()
 {
    //================================================================
-   // 1. 大きなトレンドサークル（右上 130x130）
+   // 1. 大きなトレンドサークル（左上 130x130、程よい位置）
    //================================================================
-   MakeRect(g_prefix+"TrendBG", 15, 15, 130, 130,
-            C'18,20,32', InpBullColor, 3, CORNER_RIGHT_UPPER);
-   MakeRect(g_prefix+"TrendBGInner", 20, 20, 120, 120,
-            C'25,28,42', C'25,28,42', 0, CORNER_RIGHT_UPPER);
+   MakeRect(g_prefix+"TrendBG", 30, 30, 130, 130,
+            C'18,20,32', InpBullColor, 3, CORNER_LEFT_UPPER);
+   MakeRect(g_prefix+"TrendBGInner", 35, 35, 120, 120,
+            C'25,28,42', C'25,28,42', 0, CORNER_LEFT_UPPER);
    // 大きなWingdings矢印（中央）
    MakeLabel(g_prefix+"TrendIcon", "\xE9",
-             78, 35, InpBullColor, "Wingdings", 60, CORNER_RIGHT_UPPER);
+             70, 55, InpBullColor, "Wingdings", 60, CORNER_LEFT_UPPER);
 
    //================================================================
    // 2. ボタン（右側・サークルの下に配置）
@@ -914,19 +958,52 @@ void MakeLabel(string name,string text,int x,int y,color clr,
 
 
 //+------------------------------------------------------------------+
-//| UpdateTrendPanel - v6: 大サークル + Wingdings矢印                  |
+//| GetMTFTrendState - 全TF方向一致判定                                |
+//| 戻り値: 1=全ブル, -1=全ベア, 0=不一致                               |
 //+------------------------------------------------------------------+
-void UpdateTrendPanel(bool isBullish)
+int GetMTFTrendState()
 {
-   color c = isBullish ? InpBullColor : InpBearColor;
-   // パネル枠色
-   ObjectSetInteger(0,g_prefix+"TrendBG",OBJPROP_COLOR,c);
-   // 内側背景（方向で微妙に色変え）
-   ObjectSetInteger(0,g_prefix+"TrendBGInner",OBJPROP_BGCOLOR,
-                    isBullish ? C'20,30,45' : C'35,20,25');
-   // 大きな方向アイコン
-   ObjectSetString(0,g_prefix+"TrendIcon",OBJPROP_TEXT,isBullish?"\xE9":"\xEA");
-   ObjectSetInteger(0,g_prefix+"TrendIcon",OBJPROP_COLOR,c);
+   int bullCount = 0, bearCount = 0;
+   for(int tf = 0; tf < 3; tf++)
+   {
+      double fast[1], slow[1];
+      if(CopyBuffer(g_handleMTF_FastEMA[tf], 0, 0, 1, fast) <= 0) return 0;
+      if(CopyBuffer(g_handleMTF_SlowEMA[tf], 0, 0, 1, slow) <= 0) return 0;
+      if(fast[0] > slow[0]) bullCount++;
+      else bearCount++;
+   }
+   if(bullCount == 3) return 1;
+   if(bearCount == 3) return -1;
+   return 0;
+}
+
+//+------------------------------------------------------------------+
+//| UpdateTrendPanel - 3状態: 全ブル/全ベア/不一致(非表示)              |
+//+------------------------------------------------------------------+
+void UpdateTrendPanel(int trendState)
+{
+   if(trendState == 0)
+   {
+      // 不一致 → サークルを非表示
+      ObjectSetInteger(0,g_prefix+"TrendBG",OBJPROP_TIMEFRAMES,OBJ_NO_PERIODS);
+      ObjectSetInteger(0,g_prefix+"TrendBGInner",OBJPROP_TIMEFRAMES,OBJ_NO_PERIODS);
+      ObjectSetInteger(0,g_prefix+"TrendIcon",OBJPROP_TIMEFRAMES,OBJ_NO_PERIODS);
+   }
+   else
+   {
+      // 一致 → サークルを表示
+      ObjectSetInteger(0,g_prefix+"TrendBG",OBJPROP_TIMEFRAMES,OBJ_ALL_PERIODS);
+      ObjectSetInteger(0,g_prefix+"TrendBGInner",OBJPROP_TIMEFRAMES,OBJ_ALL_PERIODS);
+      ObjectSetInteger(0,g_prefix+"TrendIcon",OBJPROP_TIMEFRAMES,OBJ_ALL_PERIODS);
+
+      bool isBullish = (trendState == 1);
+      color c = isBullish ? InpBullColor : InpBearColor;
+      ObjectSetInteger(0,g_prefix+"TrendBG",OBJPROP_COLOR,c);
+      ObjectSetInteger(0,g_prefix+"TrendBGInner",OBJPROP_BGCOLOR,
+                       isBullish ? C'20,30,45' : C'35,20,25');
+      ObjectSetString(0,g_prefix+"TrendIcon",OBJPROP_TEXT,isBullish?"\xE9":"\xEA");
+      ObjectSetInteger(0,g_prefix+"TrendIcon",OBJPROP_COLOR,c);
+   }
 }
 
 //+------------------------------------------------------------------+
