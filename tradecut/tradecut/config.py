@@ -37,6 +37,9 @@ class Style:
     music_volume: float = 0.15
     watermark: str | None = None
     watermark_opacity: float = 0.6
+    tts_enabled: bool = False
+    tts_voice: str = "ja-JP-NanamiNeural"
+    sound_effects: bool = True
 
 
 @dataclass

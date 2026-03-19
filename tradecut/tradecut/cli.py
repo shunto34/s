@@ -75,6 +75,9 @@ def new(name: str, template: str):
             "color_scheme": "vlm_default",
             "background_music": None,
             "music_volume": 0.15,
+            "tts_enabled": False,
+            "tts_voice": "ja-JP-NanamiNeural",
+            "sound_effects": True,
         },
         "captions": {
             "context": "上位足の環境認識",
@@ -150,7 +153,11 @@ def build(project_path: str, platform: str, output: str | None, quiet: bool):
     click.echo(f"  Output:    {output_path}")
     click.echo("")
 
-    composer = VideoComposer(timeline)
+    composer = VideoComposer(
+        timeline,
+        tts_enabled=config.style.tts_enabled,
+        tts_voice=config.style.tts_voice,
+    )
     result_path = composer.render(
         output_path,
         platform=platform,
@@ -179,7 +186,11 @@ def preview(project_path: str):
 
     click.echo(f"Generating preview ({timeline.total_duration:.1f}s)...")
 
-    composer = VideoComposer(timeline)
+    composer = VideoComposer(
+        timeline,
+        tts_enabled=config.style.tts_enabled,
+        tts_voice=config.style.tts_voice,
+    )
     result_path = composer.render(output_path, platform="preview", verbose=True)
 
     click.echo(f"\nPreview saved to: {result_path}")
