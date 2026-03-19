@@ -1,0 +1,10 @@
+Metadata-Version: 2.4
+Name: tradecut
+Version: 0.1.0
+Summary: Trading video automation tool for TikTok/YouTube Shorts
+Requires-Python: >=3.10
+Requires-Dist: moviepy>=2.0.0
+Requires-Dist: Pillow>=10.0.0
+Requires-Dist: pyyaml>=6.0
+Requires-Dist: click>=8.0
+Requires-Dist: numpy>=1.24.0

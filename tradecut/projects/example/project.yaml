@@ -1,0 +1,34 @@
+template: trade_recap
+duration: 30
+
+trade:
+  pair: "USDJPY"
+  direction: "long"
+  entry_price: 149.500
+  exit_price: 149.950
+  pnl_pips: 45
+  pnl_dollars: 225.00
+  result: "win"
+
+materials:
+  context_chart: "materials/h1_chart.png"
+  entry_chart: "materials/entry_chart.png"
+  # progress_clip: "materials/screen_recording.mp4"
+  result_chart: "materials/result_chart.png"
+
+style:
+  color_scheme: "vlm_default"
+  # background_music: "assets/music/chill_beat.mp3"
+  music_volume: 0.15
+
+captions:
+  context: "H1で明確なブルッシュクラウドクロスオーバー確認"
+  entry: "M5買いアロー + RSI確認でエントリー"
+  progress: "価格がTP方向へ順調に推移"
+  result: "TP到達 +45pips獲得"
+
+output:
+  filename: "usdjpy_long_45pips"
+  platforms:
+    - tiktok
+    - shorts
