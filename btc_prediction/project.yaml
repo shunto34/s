@@ -1,0 +1,27 @@
+template: crypto_prediction
+duration: 25
+trade:
+  pair: "BTCUSD"
+  direction: "long"
+  entry_price: 70516
+  exit_price: 75000
+  pnl_pips: 4484
+  pnl_dollars: 4484
+  result: "win"
+materials:
+  context_chart: "materials/h1_chart.png"
+  entry_chart: "materials/entry_chart.png"
+style:
+  color_scheme: "vlm_default"
+  music_volume: 0.15
+  tts_enabled: true
+  tts_voice: "ja-JP-NanamiNeural"
+  sound_effects: true
+captions:
+  context: "30分足でW底パターン形成中 上昇トレンド転換の兆候"
+  entry: "15分足でBOS構造ブレイクを複数確認 需要ゾーンから反発開始"
+  result: "ターゲット $75,000 約6.4%の上昇余地"
+output:
+  filename: "btc_prediction_75k"
+  platforms:
+    - tiktok

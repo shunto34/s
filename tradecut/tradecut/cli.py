@@ -15,11 +15,13 @@ from tradecut.core.timeline import Timeline
 from tradecut.templates.trade_recap import TradeRecapTemplate
 from tradecut.templates.signal_showcase import SignalShowcaseTemplate
 from tradecut.templates.pnl_summary import PnlSummaryTemplate
+from tradecut.templates.crypto_prediction import CryptoPredictionTemplate
 
 TEMPLATES = {
     "trade_recap": TradeRecapTemplate,
     "signal_showcase": SignalShowcaseTemplate,
     "pnl_summary": PnlSummaryTemplate,
+    "crypto_prediction": CryptoPredictionTemplate,
 }
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")

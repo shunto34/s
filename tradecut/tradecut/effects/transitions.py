@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from moviepy import VideoClip
+import numpy as np
+from moviepy import VideoClip, vfx
 
 
 def apply_transition(
@@ -31,30 +32,10 @@ def apply_transition(
 
 
 def _fade(clip: VideoClip, duration: float, direction: str) -> VideoClip:
-    """Simple fade in/out."""
+    """Simple fade in/out using moviepy vfx effects."""
     if direction == "in":
-        return clip.with_effects([_FadeIn(duration)])
-    return clip.with_effects([_FadeOut(duration)])
-
-
-class _FadeIn:
-    """Fade in effect compatible with moviepy 2.x."""
-
-    def __init__(self, duration: float):
-        self.duration = duration
-
-    def apply(self, clip: VideoClip) -> VideoClip:
-        return clip.crossfadein(self.duration)
-
-
-class _FadeOut:
-    """Fade out effect compatible with moviepy 2.x."""
-
-    def __init__(self, duration: float):
-        self.duration = duration
-
-    def apply(self, clip: VideoClip) -> VideoClip:
-        return clip.crossfadeout(self.duration)
+        return clip.with_effects([vfx.CrossFadeIn(duration)])
+    return clip.with_effects([vfx.CrossFadeOut(duration)])
 
 
 def _slide(
@@ -83,14 +64,12 @@ def _slide(
 
 def _glitch(clip: VideoClip, duration: float, direction: str) -> VideoClip:
     """Quick glitch transition - rapid opacity flicker."""
-    import numpy as np
 
     def glitch_filter(get_frame, t):
         frame = get_frame(t)
         if direction == "in" and t < duration:
             progress = t / duration
             if np.random.random() > progress:
-                # Random horizontal shift
                 shift = np.random.randint(-20, 20)
                 frame = np.roll(frame, shift, axis=1)
         elif direction == "out" and t > clip.duration - duration:
