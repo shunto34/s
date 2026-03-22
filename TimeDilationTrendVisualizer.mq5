@@ -72,36 +72,25 @@
 #property indicator_style10 STYLE_SOLID
 #property indicator_width10 1
 
-//+------------------------------------------------------------------+
-//| Input Parameters                                                  |
-//+------------------------------------------------------------------+
-input group "===== MA Ribbon Settings ====="
-input int    InpEMA1  = 5;
-input int    InpEMA2  = 8;
-input int    InpEMA3  = 13;
-input int    InpEMA4  = 21;
-input int    InpEMA5  = 34;
-input int    InpEMA6  = 55;
-input int    InpEMA7  = 89;
-input int    InpEMA8  = 144;
+//--- Inputs
+input int    InpEMA1  = 5;      // EMA 1 Length
+input int    InpEMA2  = 8;      // EMA 2 Length
+input int    InpEMA3  = 13;     // EMA 3 Length
+input int    InpEMA4  = 21;     // EMA 4 Length
+input int    InpEMA5  = 34;     // EMA 5 Length
+input int    InpEMA6  = 55;     // EMA 6 Length
+input int    InpEMA7  = 89;     // EMA 7 Length
+input int    InpEMA8  = 144;    // EMA 8 Length
+input int    InpSwingLookback = 10;  // Swing Lookback
+input bool   InpShow5min  = true;    // Show 5min Structure
+input bool   InpShow15min = true;    // Show 15min Structure
+input bool   InpShow1H    = true;    // Show 1H Structure
+input int    InpTrendConfirm = 2;    // Min TF Alignment (1-3)
+input bool   InpShowLevels   = true; // Show Key Levels
+input int    InpMaxLevels    = 3;    // Max Levels Per Side
+input int    InpLevelExtend  = 50;   // Level Extend (bars)
 
-input group "===== Structure Detection ====="
-input int    InpSwingLookback = 10;
-input bool   InpShow5min      = true;
-input bool   InpShow15min     = true;
-input bool   InpShow1H        = true;
-
-input group "===== BULL/BEAR Signal ====="
-input int    InpTrendConfirm  = 2;
-
-input group "===== Key Level ====="
-input bool   InpShowLevels    = true;
-input int    InpMaxLevels     = 3;
-input int    InpLevelExtend   = 50;
-
-//+------------------------------------------------------------------+
-//| Global Variables                                                   |
-//+------------------------------------------------------------------+
+//--- Ribbon buffers (7 fills x 2 = 14)
 double g_ema1[];
 double g_ema2a[];
 double g_ema2b[];
@@ -116,337 +105,266 @@ double g_ema6b[];
 double g_ema7a[];
 double g_ema7b[];
 double g_ema8[];
-
+//--- Signal buffers
 double g_bullSignal[];
 double g_bearSignal[];
-
-double g_candleOpen[];
-double g_candleHigh[];
-double g_candleLow[];
-double g_candleClose[];
-double g_candleColor[];
-
+//--- Candle color buffers (4 data + 1 color)
+double g_candleO[];
+double g_candleH[];
+double g_candleL[];
+double g_candleC[];
+double g_candleClr[];
+//--- EMA work arrays
+double g_ed0[];
+double g_ed1[];
+double g_ed2[];
+double g_ed3[];
+double g_ed4[];
+double g_ed5[];
+double g_ed6[];
+double g_ed7[];
+//--- EMA handles
 int g_hEMA[8];
-
-double g_emaD0[];
-double g_emaD1[];
-double g_emaD2[];
-double g_emaD3[];
-double g_emaD4[];
-double g_emaD5[];
-double g_emaD6[];
-double g_emaD7[];
-
-ENUM_TIMEFRAMES g_mtfPeriods[3];
-string g_mtfLabels[3];
-
-struct StructureState
-{
-   double prevSH;
-   double prevSL;
-   double lastSH;
-   double lastSL;
-   int    trend;
-};
-
-StructureState g_structState[3];
+//--- MTF
+ENUM_TIMEFRAMES g_mtfTF[3];
+string g_mtfName[3];
+//--- Structure state (parallel arrays instead of struct)
+double g_prevSH[3];
+double g_prevSL[3];
+double g_lastSH[3];
+double g_lastSL[3];
+int    g_trend[3];
+//--- Master trend
 int g_masterTrend;
-
+//--- Key level management
 string g_prefix;
-int    g_highLevelCount;
-int    g_lowLevelCount;
-string g_highLevelNames[];
-string g_lowLevelNames[];
+int    g_hiLvlCnt;
+int    g_loLvlCnt;
+string g_hiNames[];
+string g_loNames[];
+//--- Duplicate prevention
+int g_lBOSBu[3];
+int g_lBOSBe[3];
+int g_lMSSBu[3];
+int g_lMSSBe[3];
 
-int g_lastBOS_Bull[3];
-int g_lastBOS_Bear[3];
-int g_lastMSS_Bull[3];
-int g_lastMSS_Bear[3];
-
-//+------------------------------------------------------------------+
-//| Custom indicator initialization function                          |
 //+------------------------------------------------------------------+
 int OnInit()
 {
    g_prefix = "TDTV_";
-   g_mtfPeriods[0] = PERIOD_M5;
-   g_mtfPeriods[1] = PERIOD_M15;
-   g_mtfPeriods[2] = PERIOD_H1;
-   g_mtfLabels[0] = "5Min";
-   g_mtfLabels[1] = "15Min";
-   g_mtfLabels[2] = "1H";
+   g_mtfTF[0] = PERIOD_M5;
+   g_mtfTF[1] = PERIOD_M15;
+   g_mtfTF[2] = PERIOD_H1;
+   g_mtfName[0] = "5Min";
+   g_mtfName[1] = "15Min";
+   g_mtfName[2] = "1H";
 
-   SetIndexBuffer(0,  g_ema1,        INDICATOR_DATA);
-   SetIndexBuffer(1,  g_ema2a,       INDICATOR_DATA);
-   SetIndexBuffer(2,  g_ema2b,       INDICATOR_DATA);
-   SetIndexBuffer(3,  g_ema3a,       INDICATOR_DATA);
-   SetIndexBuffer(4,  g_ema3b,       INDICATOR_DATA);
-   SetIndexBuffer(5,  g_ema4a,       INDICATOR_DATA);
-   SetIndexBuffer(6,  g_ema4b,       INDICATOR_DATA);
-   SetIndexBuffer(7,  g_ema5a,       INDICATOR_DATA);
-   SetIndexBuffer(8,  g_ema5b,       INDICATOR_DATA);
-   SetIndexBuffer(9,  g_ema6a,       INDICATOR_DATA);
-   SetIndexBuffer(10, g_ema6b,       INDICATOR_DATA);
-   SetIndexBuffer(11, g_ema7a,       INDICATOR_DATA);
-   SetIndexBuffer(12, g_ema7b,       INDICATOR_DATA);
-   SetIndexBuffer(13, g_ema8,        INDICATOR_DATA);
-   SetIndexBuffer(14, g_bullSignal,  INDICATOR_DATA);
-   SetIndexBuffer(15, g_bearSignal,  INDICATOR_DATA);
-   SetIndexBuffer(16, g_candleOpen,  INDICATOR_DATA);
-   SetIndexBuffer(17, g_candleHigh,  INDICATOR_DATA);
-   SetIndexBuffer(18, g_candleLow,   INDICATOR_DATA);
-   SetIndexBuffer(19, g_candleClose, INDICATOR_DATA);
-   SetIndexBuffer(20, g_candleColor, INDICATOR_COLOR_INDEX);
+   SetIndexBuffer(0,  g_ema1,      INDICATOR_DATA);
+   SetIndexBuffer(1,  g_ema2a,     INDICATOR_DATA);
+   SetIndexBuffer(2,  g_ema2b,     INDICATOR_DATA);
+   SetIndexBuffer(3,  g_ema3a,     INDICATOR_DATA);
+   SetIndexBuffer(4,  g_ema3b,     INDICATOR_DATA);
+   SetIndexBuffer(5,  g_ema4a,     INDICATOR_DATA);
+   SetIndexBuffer(6,  g_ema4b,     INDICATOR_DATA);
+   SetIndexBuffer(7,  g_ema5a,     INDICATOR_DATA);
+   SetIndexBuffer(8,  g_ema5b,     INDICATOR_DATA);
+   SetIndexBuffer(9,  g_ema6a,     INDICATOR_DATA);
+   SetIndexBuffer(10, g_ema6b,     INDICATOR_DATA);
+   SetIndexBuffer(11, g_ema7a,     INDICATOR_DATA);
+   SetIndexBuffer(12, g_ema7b,     INDICATOR_DATA);
+   SetIndexBuffer(13, g_ema8,      INDICATOR_DATA);
+   SetIndexBuffer(14, g_bullSignal,INDICATOR_DATA);
+   SetIndexBuffer(15, g_bearSignal,INDICATOR_DATA);
+   SetIndexBuffer(16, g_candleO,   INDICATOR_DATA);
+   SetIndexBuffer(17, g_candleH,   INDICATOR_DATA);
+   SetIndexBuffer(18, g_candleL,   INDICATOR_DATA);
+   SetIndexBuffer(19, g_candleC,   INDICATOR_DATA);
+   SetIndexBuffer(20, g_candleClr, INDICATOR_COLOR_INDEX);
 
    PlotIndexSetInteger(7, PLOT_ARROW, 159);
    PlotIndexSetDouble(7, PLOT_EMPTY_VALUE, EMPTY_VALUE);
    PlotIndexSetInteger(8, PLOT_ARROW, 159);
    PlotIndexSetDouble(8, PLOT_EMPTY_VALUE, EMPTY_VALUE);
 
-   int lengths[8];
-   lengths[0] = InpEMA1;
-   lengths[1] = InpEMA2;
-   lengths[2] = InpEMA3;
-   lengths[3] = InpEMA4;
-   lengths[4] = InpEMA5;
-   lengths[5] = InpEMA6;
-   lengths[6] = InpEMA7;
-   lengths[7] = InpEMA8;
+   g_hEMA[0] = iMA(_Symbol, PERIOD_CURRENT, InpEMA1, 0, MODE_EMA, PRICE_CLOSE);
+   g_hEMA[1] = iMA(_Symbol, PERIOD_CURRENT, InpEMA2, 0, MODE_EMA, PRICE_CLOSE);
+   g_hEMA[2] = iMA(_Symbol, PERIOD_CURRENT, InpEMA3, 0, MODE_EMA, PRICE_CLOSE);
+   g_hEMA[3] = iMA(_Symbol, PERIOD_CURRENT, InpEMA4, 0, MODE_EMA, PRICE_CLOSE);
+   g_hEMA[4] = iMA(_Symbol, PERIOD_CURRENT, InpEMA5, 0, MODE_EMA, PRICE_CLOSE);
+   g_hEMA[5] = iMA(_Symbol, PERIOD_CURRENT, InpEMA6, 0, MODE_EMA, PRICE_CLOSE);
+   g_hEMA[6] = iMA(_Symbol, PERIOD_CURRENT, InpEMA7, 0, MODE_EMA, PRICE_CLOSE);
+   g_hEMA[7] = iMA(_Symbol, PERIOD_CURRENT, InpEMA8, 0, MODE_EMA, PRICE_CLOSE);
 
    for(int i = 0; i < 8; i++)
    {
-      g_hEMA[i] = iMA(_Symbol, PERIOD_CURRENT, lengths[i], 0, MODE_EMA, PRICE_CLOSE);
       if(g_hEMA[i] == INVALID_HANDLE)
-      {
-         Print("EMA handle creation failed: ", lengths[i]);
          return(INIT_FAILED);
-      }
    }
 
    for(int i = 0; i < 3; i++)
    {
-      g_structState[i].prevSH = 0;
-      g_structState[i].prevSL = 0;
-      g_structState[i].lastSH = 0;
-      g_structState[i].lastSL = 0;
-      g_structState[i].trend  = 0;
-      g_lastBOS_Bull[i] = -1;
-      g_lastBOS_Bear[i] = -1;
-      g_lastMSS_Bull[i] = -1;
-      g_lastMSS_Bear[i] = -1;
+      g_prevSH[i] = 0.0;
+      g_prevSL[i] = 0.0;
+      g_lastSH[i] = 0.0;
+      g_lastSL[i] = 0.0;
+      g_trend[i]  = 0;
+      g_lBOSBu[i] = -1;
+      g_lBOSBe[i] = -1;
+      g_lMSSBu[i] = -1;
+      g_lMSSBe[i] = -1;
    }
 
-   g_masterTrend    = 0;
-   g_highLevelCount = 0;
-   g_lowLevelCount  = 0;
-   ArrayResize(g_highLevelNames, 0);
-   ArrayResize(g_lowLevelNames, 0);
+   g_masterTrend = 0;
+   g_hiLvlCnt = 0;
+   g_loLvlCnt = 0;
+   ArrayResize(g_hiNames, 0);
+   ArrayResize(g_loNames, 0);
 
    IndicatorSetString(INDICATOR_SHORTNAME, "TDTV [EZPZ]");
    return(INIT_SUCCEEDED);
 }
 
 //+------------------------------------------------------------------+
-//| Custom indicator deinitialization function                         |
-//+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
    ObjectsDeleteAll(0, g_prefix);
    for(int i = 0; i < 8; i++)
-   {
       if(g_hEMA[i] != INVALID_HANDLE)
          IndicatorRelease(g_hEMA[i]);
-   }
    ChartRedraw();
 }
 
 //+------------------------------------------------------------------+
-//| PivotHigh                                                          |
-//+------------------------------------------------------------------+
-double PivotHigh(const double &arr[], int bar, int left, int right, int total)
+double FindPivotHigh(const double &a[], int bar, int lb, int rb, int sz)
 {
-   if(bar - left < 0 || bar + right >= total)
-      return(0.0);
-   double val = arr[bar];
-   for(int i = 1; i <= left; i++)
-      if(arr[bar - i] >= val) return(0.0);
-   for(int i = 1; i <= right; i++)
-      if(arr[bar + i] >= val) return(0.0);
-   return(val);
+   if(bar - lb < 0 || bar + rb >= sz) return(0.0);
+   double v = a[bar];
+   for(int i = 1; i <= lb; i++)
+      if(a[bar - i] >= v) return(0.0);
+   for(int i = 1; i <= rb; i++)
+      if(a[bar + i] >= v) return(0.0);
+   return(v);
 }
 
 //+------------------------------------------------------------------+
-//| PivotLow                                                           |
-//+------------------------------------------------------------------+
-double PivotLow(const double &arr[], int bar, int left, int right, int total)
+double FindPivotLow(const double &a[], int bar, int lb, int rb, int sz)
 {
-   if(bar - left < 0 || bar + right >= total)
-      return(0.0);
-   double val = arr[bar];
-   for(int i = 1; i <= left; i++)
-      if(arr[bar - i] <= val) return(0.0);
-   for(int i = 1; i <= right; i++)
-      if(arr[bar + i] <= val) return(0.0);
-   return(val);
+   if(bar - lb < 0 || bar + rb >= sz) return(0.0);
+   double v = a[bar];
+   for(int i = 1; i <= lb; i++)
+      if(a[bar - i] <= v) return(0.0);
+   for(int i = 1; i <= rb; i++)
+      if(a[bar + i] <= v) return(0.0);
+   return(v);
 }
 
 //+------------------------------------------------------------------+
-//| GetMTFPivots                                                       |
-//+------------------------------------------------------------------+
-void GetMTFPivots(ENUM_TIMEFRAMES tf, int lookback,
-                  double &outPH, double &outPL, double &outClose)
+void GetMTFPivots(ENUM_TIMEFRAMES tf, int lb,
+                  double &oPH, double &oPL, double &oCls)
 {
-   outPH    = 0.0;
-   outPL    = 0.0;
-   outClose = 0.0;
-
-   int need = lookback * 2 + 5;
-   double highs[];
-   double lows[];
-   double closes[];
-   ArraySetAsSeries(highs, false);
-   ArraySetAsSeries(lows, false);
-   ArraySetAsSeries(closes, false);
-
-   int cH = CopyHigh(_Symbol, tf, 0, need, highs);
-   int cL = CopyLow(_Symbol, tf, 0, need, lows);
-   int cC = CopyClose(_Symbol, tf, 0, need, closes);
-
-   if(cH < need || cL < need || cC < need)
-      return;
-
-   outClose = closes[cC - 1];
-
-   int chk = cH - 1 - lookback;
-   if(chk < lookback) return;
-
-   outPH = PivotHigh(highs, chk, lookback, lookback, cH);
-   outPL = PivotLow(lows, chk, lookback, lookback, cL);
+   oPH = 0.0; oPL = 0.0; oCls = 0.0;
+   int need = lb * 2 + 5;
+   double hi[], lo[], cl[];
+   ArraySetAsSeries(hi, false);
+   ArraySetAsSeries(lo, false);
+   ArraySetAsSeries(cl, false);
+   int cH = CopyHigh(_Symbol, tf, 0, need, hi);
+   int cL = CopyLow(_Symbol, tf, 0, need, lo);
+   int cC = CopyClose(_Symbol, tf, 0, need, cl);
+   if(cH < need || cL < need || cC < need) return;
+   oCls = cl[cC - 1];
+   int chk = cH - 1 - lb;
+   if(chk < lb) return;
+   oPH = FindPivotHigh(hi, chk, lb, lb, cH);
+   oPL = FindPivotLow(lo, chk, lb, lb, cL);
 }
 
 //+------------------------------------------------------------------+
-//| UpdateStructure                                                    |
-//+------------------------------------------------------------------+
-void UpdateStructure(int idx, double ph, double pl, double cls,
-                     bool &bosBull, bool &bosBear,
-                     bool &mssBull, bool &mssBear)
+void DoStructure(int idx, double ph, double pl, double cls,
+                 bool &bBu, bool &bBe, bool &mBu, bool &mBe)
 {
-   bosBull = false;
-   bosBear = false;
-   mssBull = false;
-   mssBear = false;
-
-   if(ph > 0.0)
+   bBu = false; bBe = false; mBu = false; mBe = false;
+   if(ph > 0.0) { g_prevSH[idx] = g_lastSH[idx]; g_lastSH[idx] = ph; }
+   if(pl > 0.0) { g_prevSL[idx] = g_lastSL[idx]; g_lastSL[idx] = pl; }
+   double lh = g_lastSH[idx]; double ll = g_lastSL[idx];
+   double ps = g_prevSH[idx]; double pl2 = g_prevSL[idx];
+   if(lh > 0.0 && ps > 0.0 && ll > 0.0 && pl2 > 0.0)
    {
-      g_structState[idx].prevSH = g_structState[idx].lastSH;
-      g_structState[idx].lastSH = ph;
+      if(lh > ps && ll > pl2) g_trend[idx] = 1;
+      else if(lh < ps && ll < pl2) g_trend[idx] = -1;
    }
-   if(pl > 0.0)
-   {
-      g_structState[idx].prevSL = g_structState[idx].lastSL;
-      g_structState[idx].lastSL = pl;
-   }
-
-   double lSH = g_structState[idx].lastSH;
-   double lSL = g_structState[idx].lastSL;
-   double pSH = g_structState[idx].prevSH;
-   double pSL = g_structState[idx].prevSL;
-
-   if(lSH > 0.0 && pSH > 0.0 && lSL > 0.0 && pSL > 0.0)
-   {
-      if(lSH > pSH && lSL > pSL)
-         g_structState[idx].trend = 1;
-      else if(lSH < pSH && lSL < pSL)
-         g_structState[idx].trend = -1;
-   }
-
-   int trend = g_structState[idx].trend;
-
-   if(trend == 1  && lSH > 0.0 && cls > lSH) bosBull = true;
-   if(trend == -1 && lSL > 0.0 && cls < lSL) bosBear = true;
-   if(trend == -1 && lSH > 0.0 && cls > lSH) mssBull = true;
-   if(trend == 1  && lSL > 0.0 && cls < lSL) mssBear = true;
-
-   if(mssBull) g_structState[idx].trend = 1;
-   if(mssBear) g_structState[idx].trend = -1;
+   int tr = g_trend[idx];
+   if(tr == 1 && lh > 0.0 && cls > lh) bBu = true;
+   if(tr == -1 && ll > 0.0 && cls < ll) bBe = true;
+   if(tr == -1 && lh > 0.0 && cls > lh) mBu = true;
+   if(tr == 1 && ll > 0.0 && cls < ll) mBe = true;
+   if(mBu) g_trend[idx] = 1;
+   if(mBe) g_trend[idx] = -1;
 }
 
 //+------------------------------------------------------------------+
-//| CreateBOSLabel                                                     |
-//+------------------------------------------------------------------+
-void CreateBOSLabel(string tag, datetime dt, double price,
-                    string text, color clr, bool isAbove)
+void MakeBOSLabel(string tag, datetime dt, double pr,
+                  string txt, color c, bool above)
 {
-   string name = g_prefix + tag;
-   if(ObjectFind(0, name) >= 0)
-      ObjectDelete(0, name);
-
-   ObjectCreate(0, name, OBJ_TEXT, 0, dt, price);
-   ObjectSetString(0, name, OBJPROP_TEXT, text);
-   ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
-   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, 8);
-   ObjectSetString(0, name, OBJPROP_FONT, "Arial Bold");
-   ObjectSetInteger(0, name, OBJPROP_ANCHOR,
-                    isAbove ? ANCHOR_LOWER : ANCHOR_UPPER);
+   string nm = g_prefix + tag;
+   if(ObjectFind(0, nm) >= 0) ObjectDelete(0, nm);
+   ObjectCreate(0, nm, OBJ_TEXT, 0, dt, pr);
+   ObjectSetString(0, nm, OBJPROP_TEXT, txt);
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, c);
+   ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, 8);
+   ObjectSetString(0, nm, OBJPROP_FONT, "Arial Bold");
+   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, above ? ANCHOR_LOWER : ANCHOR_UPPER);
 }
 
 //+------------------------------------------------------------------+
-//| CreateKeyLevel                                                     |
-//+------------------------------------------------------------------+
-void CreateKeyLevel(bool isHigh, double price, datetime t1, datetime t2)
+void MakeKeyLevel(bool isHi, double pr, datetime t1, datetime t2)
 {
-   string name;
-   color  clr;
-
-   if(isHigh)
+   string nm;
+   color c;
+   if(isHi)
    {
-      g_highLevelCount++;
-      name = g_prefix + "HL_" + IntegerToString(g_highLevelCount);
-      clr  = C'0,229,255';
-      int sz = ArraySize(g_highLevelNames);
-      ArrayResize(g_highLevelNames, sz + 1);
-      g_highLevelNames[sz] = name;
-      while(ArraySize(g_highLevelNames) > InpMaxLevels)
+      g_hiLvlCnt++;
+      nm = g_prefix + "HL" + IntegerToString(g_hiLvlCnt);
+      c = C'0,229,255';
+      int s = ArraySize(g_hiNames);
+      ArrayResize(g_hiNames, s + 1);
+      g_hiNames[s] = nm;
+      while(ArraySize(g_hiNames) > InpMaxLevels)
       {
-         ObjectDelete(0, g_highLevelNames[0]);
-         int n = ArraySize(g_highLevelNames);
-         for(int i = 0; i < n - 1; i++)
-            g_highLevelNames[i] = g_highLevelNames[i + 1];
-         ArrayResize(g_highLevelNames, n - 1);
+         ObjectDelete(0, g_hiNames[0]);
+         int n = ArraySize(g_hiNames);
+         for(int i = 0; i < n - 1; i++) g_hiNames[i] = g_hiNames[i+1];
+         ArrayResize(g_hiNames, n - 1);
       }
    }
    else
    {
-      g_lowLevelCount++;
-      name = g_prefix + "LL_" + IntegerToString(g_lowLevelCount);
-      clr  = C'255,64,129';
-      int sz = ArraySize(g_lowLevelNames);
-      ArrayResize(g_lowLevelNames, sz + 1);
-      g_lowLevelNames[sz] = name;
-      while(ArraySize(g_lowLevelNames) > InpMaxLevels)
+      g_loLvlCnt++;
+      nm = g_prefix + "LL" + IntegerToString(g_loLvlCnt);
+      c = C'255,64,129';
+      int s = ArraySize(g_loNames);
+      ArrayResize(g_loNames, s + 1);
+      g_loNames[s] = nm;
+      while(ArraySize(g_loNames) > InpMaxLevels)
       {
-         ObjectDelete(0, g_lowLevelNames[0]);
-         int n = ArraySize(g_lowLevelNames);
-         for(int i = 0; i < n - 1; i++)
-            g_lowLevelNames[i] = g_lowLevelNames[i + 1];
-         ArrayResize(g_lowLevelNames, n - 1);
+         ObjectDelete(0, g_loNames[0]);
+         int n = ArraySize(g_loNames);
+         for(int i = 0; i < n - 1; i++) g_loNames[i] = g_loNames[i+1];
+         ArrayResize(g_loNames, n - 1);
       }
    }
-
-   if(ObjectFind(0, name) >= 0)
-      ObjectDelete(0, name);
-
-   ObjectCreate(0, name, OBJ_TREND, 0, t1, price, t2, price);
-   ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
-   ObjectSetInteger(0, name, OBJPROP_STYLE, STYLE_SOLID);
-   ObjectSetInteger(0, name, OBJPROP_WIDTH, 1);
-   ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT, false);
-   ObjectSetInteger(0, name, OBJPROP_BACK, true);
-   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+   if(ObjectFind(0, nm) >= 0) ObjectDelete(0, nm);
+   ObjectCreate(0, nm, OBJ_TREND, 0, t1, pr, t2, pr);
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, c);
+   ObjectSetInteger(0, nm, OBJPROP_STYLE, STYLE_SOLID);
+   ObjectSetInteger(0, nm, OBJPROP_WIDTH, 1);
+   ObjectSetInteger(0, nm, OBJPROP_RAY_RIGHT, false);
+   ObjectSetInteger(0, nm, OBJPROP_BACK, true);
+   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
 }
 
 //+------------------------------------------------------------------+
-//| Custom indicator iteration function                                |
+//| NOTE: spread is const int& (NOT const long&) per MQL5 spec       |
 //+------------------------------------------------------------------+
 int OnCalculate(const int rates_total,
                 const int prev_calculated,
@@ -457,186 +375,136 @@ int OnCalculate(const int rates_total,
                 const double &close[],
                 const long &tick_volume[],
                 const long &volume[],
-                const long &spread[])
+                const int &spread[])
 {
-   if(rates_total < InpEMA8 + 10)
-      return(0);
+   if(rates_total < InpEMA8 + 10) return(0);
 
-   int start;
-   if(prev_calculated == 0)
-      start = 0;
-   else
-      start = prev_calculated - 1;
+   int start = (prev_calculated == 0) ? 0 : prev_calculated - 1;
 
-   //--- EMA data copy
-   ArraySetAsSeries(g_emaD0, false);
-   ArraySetAsSeries(g_emaD1, false);
-   ArraySetAsSeries(g_emaD2, false);
-   ArraySetAsSeries(g_emaD3, false);
-   ArraySetAsSeries(g_emaD4, false);
-   ArraySetAsSeries(g_emaD5, false);
-   ArraySetAsSeries(g_emaD6, false);
-   ArraySetAsSeries(g_emaD7, false);
+   ArraySetAsSeries(g_ed0, false);
+   ArraySetAsSeries(g_ed1, false);
+   ArraySetAsSeries(g_ed2, false);
+   ArraySetAsSeries(g_ed3, false);
+   ArraySetAsSeries(g_ed4, false);
+   ArraySetAsSeries(g_ed5, false);
+   ArraySetAsSeries(g_ed6, false);
+   ArraySetAsSeries(g_ed7, false);
 
-   if(CopyBuffer(g_hEMA[0], 0, 0, rates_total, g_emaD0) < rates_total) return(0);
-   if(CopyBuffer(g_hEMA[1], 0, 0, rates_total, g_emaD1) < rates_total) return(0);
-   if(CopyBuffer(g_hEMA[2], 0, 0, rates_total, g_emaD2) < rates_total) return(0);
-   if(CopyBuffer(g_hEMA[3], 0, 0, rates_total, g_emaD3) < rates_total) return(0);
-   if(CopyBuffer(g_hEMA[4], 0, 0, rates_total, g_emaD4) < rates_total) return(0);
-   if(CopyBuffer(g_hEMA[5], 0, 0, rates_total, g_emaD5) < rates_total) return(0);
-   if(CopyBuffer(g_hEMA[6], 0, 0, rates_total, g_emaD6) < rates_total) return(0);
-   if(CopyBuffer(g_hEMA[7], 0, 0, rates_total, g_emaD7) < rates_total) return(0);
+   if(CopyBuffer(g_hEMA[0],0,0,rates_total,g_ed0)<rates_total) return(0);
+   if(CopyBuffer(g_hEMA[1],0,0,rates_total,g_ed1)<rates_total) return(0);
+   if(CopyBuffer(g_hEMA[2],0,0,rates_total,g_ed2)<rates_total) return(0);
+   if(CopyBuffer(g_hEMA[3],0,0,rates_total,g_ed3)<rates_total) return(0);
+   if(CopyBuffer(g_hEMA[4],0,0,rates_total,g_ed4)<rates_total) return(0);
+   if(CopyBuffer(g_hEMA[5],0,0,rates_total,g_ed5)<rates_total) return(0);
+   if(CopyBuffer(g_hEMA[6],0,0,rates_total,g_ed6)<rates_total) return(0);
+   if(CopyBuffer(g_hEMA[7],0,0,rates_total,g_ed7)<rates_total) return(0);
 
-   //--- COMPONENT A: EMA RIBBON + CANDLE COLORING
    for(int i = start; i < rates_total; i++)
    {
-      double e1 = g_emaD0[i];
-      double e2 = g_emaD1[i];
-      double e3 = g_emaD2[i];
-      double e4 = g_emaD3[i];
-      double e5 = g_emaD4[i];
-      double e6 = g_emaD5[i];
-      double e7 = g_emaD6[i];
-      double e8 = g_emaD7[i];
+      double e1=g_ed0[i]; double e2=g_ed1[i]; double e3=g_ed2[i]; double e4=g_ed3[i];
+      double e5=g_ed4[i]; double e6=g_ed5[i]; double e7=g_ed6[i]; double e8=g_ed7[i];
 
-      g_ema1[i]  = e1;  g_ema2a[i] = e2;
-      g_ema2b[i] = e2;  g_ema3a[i] = e3;
-      g_ema3b[i] = e3;  g_ema4a[i] = e4;
-      g_ema4b[i] = e4;  g_ema5a[i] = e5;
-      g_ema5b[i] = e5;  g_ema6a[i] = e6;
-      g_ema6b[i] = e6;  g_ema7a[i] = e7;
-      g_ema7b[i] = e7;  g_ema8[i]  = e8;
+      g_ema1[i]=e1;  g_ema2a[i]=e2;
+      g_ema2b[i]=e2; g_ema3a[i]=e3;
+      g_ema3b[i]=e3; g_ema4a[i]=e4;
+      g_ema4b[i]=e4; g_ema5a[i]=e5;
+      g_ema5b[i]=e5; g_ema6a[i]=e6;
+      g_ema6b[i]=e6; g_ema7a[i]=e7;
+      g_ema7b[i]=e7; g_ema8[i]=e8;
 
-      g_candleOpen[i]  = open[i];
-      g_candleHigh[i]  = high[i];
-      g_candleLow[i]   = low[i];
-      g_candleClose[i] = close[i];
+      g_candleO[i]=open[i];
+      g_candleH[i]=high[i];
+      g_candleL[i]=low[i];
+      g_candleC[i]=close[i];
+      if(e1>e8)      g_candleClr[i]=0.0;
+      else if(e1<e8) g_candleClr[i]=1.0;
+      else           g_candleClr[i]=2.0;
 
-      if(e1 > e8)
-         g_candleColor[i] = 0.0;
-      else if(e1 < e8)
-         g_candleColor[i] = 1.0;
-      else
-         g_candleColor[i] = 2.0;
-
-      g_bullSignal[i] = EMPTY_VALUE;
-      g_bearSignal[i] = EMPTY_VALUE;
+      g_bullSignal[i]=EMPTY_VALUE;
+      g_bearSignal[i]=EMPTY_VALUE;
    }
 
-   //--- COMPONENT B: MTF STRUCTURE DETECTION
    int lastBar = rates_total - 1;
 
-   for(int tf = 0; tf < 3; tf++)
+   for(int tf=0; tf<3; tf++)
    {
-      if(tf == 0 && !InpShow5min)  continue;
-      if(tf == 1 && !InpShow15min) continue;
-      if(tf == 2 && !InpShow1H)    continue;
+      if(tf==0 && !InpShow5min)  continue;
+      if(tf==1 && !InpShow15min) continue;
+      if(tf==2 && !InpShow1H)    continue;
 
-      double ph2 = 0.0;
-      double pl2 = 0.0;
-      double cls2 = 0.0;
-      GetMTFPivots(g_mtfPeriods[tf], InpSwingLookback, ph2, pl2, cls2);
+      double ph=0.0, pl=0.0, cls=0.0;
+      GetMTFPivots(g_mtfTF[tf], InpSwingLookback, ph, pl, cls);
 
-      bool bB = false;
-      bool bBr = false;
-      bool mB = false;
-      bool mBr = false;
-      UpdateStructure(tf, ph2, pl2, cls2, bB, bBr, mB, mBr);
+      bool bBu=false, bBe=false, mBu=false, mBe=false;
+      DoStructure(tf, ph, pl, cls, bBu, bBe, mBu, mBe);
 
-      if(bB && g_lastBOS_Bull[tf] != lastBar)
+      if(bBu && g_lBOSBu[tf]!=lastBar)
       {
-         g_lastBOS_Bull[tf] = lastBar;
-         string tag = "BOS_Bu_" + g_mtfLabels[tf] + "_" + IntegerToString(lastBar);
-         CreateBOSLabel(tag, time[lastBar], low[lastBar],
-                       "BOS " + g_mtfLabels[tf], C'0,230,118', false);
+         g_lBOSBu[tf]=lastBar;
+         MakeBOSLabel("BBu"+g_mtfName[tf]+IntegerToString(lastBar),
+                      time[lastBar],low[lastBar],"BOS "+g_mtfName[tf],C'0,230,118',false);
       }
-      if(bBr && g_lastBOS_Bear[tf] != lastBar)
+      if(bBe && g_lBOSBe[tf]!=lastBar)
       {
-         g_lastBOS_Bear[tf] = lastBar;
-         string tag = "BOS_Be_" + g_mtfLabels[tf] + "_" + IntegerToString(lastBar);
-         CreateBOSLabel(tag, time[lastBar], high[lastBar],
-                       "BOS " + g_mtfLabels[tf], C'255,82,82', true);
+         g_lBOSBe[tf]=lastBar;
+         MakeBOSLabel("BBe"+g_mtfName[tf]+IntegerToString(lastBar),
+                      time[lastBar],high[lastBar],"BOS "+g_mtfName[tf],C'255,82,82',true);
       }
-      if(mB && g_lastMSS_Bull[tf] != lastBar)
+      if(mBu && g_lMSSBu[tf]!=lastBar)
       {
-         g_lastMSS_Bull[tf] = lastBar;
-         string tag = "MSS_Bu_" + g_mtfLabels[tf] + "_" + IntegerToString(lastBar);
-         CreateBOSLabel(tag, time[lastBar], low[lastBar],
-                       "MSS " + g_mtfLabels[tf], C'0,191,165', false);
+         g_lMSSBu[tf]=lastBar;
+         MakeBOSLabel("MBu"+g_mtfName[tf]+IntegerToString(lastBar),
+                      time[lastBar],low[lastBar],"MSS "+g_mtfName[tf],C'0,191,165',false);
       }
-      if(mBr && g_lastMSS_Bear[tf] != lastBar)
+      if(mBe && g_lMSSBe[tf]!=lastBar)
       {
-         g_lastMSS_Bear[tf] = lastBar;
-         string tag = "MSS_Be_" + g_mtfLabels[tf] + "_" + IntegerToString(lastBar);
-         CreateBOSLabel(tag, time[lastBar], high[lastBar],
-                       "MSS " + g_mtfLabels[tf], C'255,64,129', true);
+         g_lMSSBe[tf]=lastBar;
+         MakeBOSLabel("MBe"+g_mtfName[tf]+IntegerToString(lastBar),
+                      time[lastBar],high[lastBar],"MSS "+g_mtfName[tf],C'255,64,129',true);
       }
    }
 
-   //--- COMPONENT C: BULL / BEAR TREND CHANGE SIGNALS
-   int bullCount = 0;
-   int bearCount = 0;
-   for(int tf = 0; tf < 3; tf++)
+   int buCnt=0, beCnt=0;
+   for(int tf=0; tf<3; tf++)
    {
-      if(g_structState[tf].trend == 1)  bullCount++;
-      if(g_structState[tf].trend == -1) bearCount++;
+      if(g_trend[tf]==1)  buCnt++;
+      if(g_trend[tf]==-1) beCnt++;
    }
+   bool rBull = (g_ed0[lastBar] > g_ed7[lastBar]);
+   bool aBull = (buCnt>=InpTrendConfirm) && rBull;
+   bool aBear = (beCnt>=InpTrendConfirm) && !rBull;
+   int nT;
+   if(aBull) nT=1;
+   else if(aBear) nT=-1;
+   else nT=g_masterTrend;
+   if(nT==1 && g_masterTrend!=1) g_bullSignal[lastBar]=low[lastBar];
+   if(nT==-1 && g_masterTrend!=-1) g_bearSignal[lastBar]=high[lastBar];
+   g_masterTrend=nT;
 
-   double ema1Last = g_emaD0[lastBar];
-   double ema8Last = g_emaD7[lastBar];
-   bool ribbonBull = (ema1Last > ema8Last);
-
-   bool allBull = (bullCount >= InpTrendConfirm) && ribbonBull;
-   bool allBear = (bearCount >= InpTrendConfirm) && !ribbonBull;
-
-   int newTrend;
-   if(allBull)
-      newTrend = 1;
-   else if(allBear)
-      newTrend = -1;
-   else
-      newTrend = g_masterTrend;
-
-   bool sigBull = (newTrend == 1 && g_masterTrend != 1);
-   bool sigBear = (newTrend == -1 && g_masterTrend != -1);
-
-   g_masterTrend = newTrend;
-
-   if(sigBull)
-      g_bullSignal[lastBar] = low[lastBar];
-   if(sigBear)
-      g_bearSignal[lastBar] = high[lastBar];
-
-   //--- COMPONENT D: HORIZONTAL KEY LEVELS
    if(InpShowLevels)
    {
-      int pivotBar = lastBar - InpSwingLookback;
-      if(pivotBar >= InpSwingLookback)
+      int pb=lastBar-InpSwingLookback;
+      if(pb>=InpSwingLookback)
       {
-         double curPH = PivotHigh(high, pivotBar, InpSwingLookback, InpSwingLookback, rates_total);
-         double curPL = PivotLow(low, pivotBar, InpSwingLookback, InpSwingLookback, rates_total);
-
-         if(curPH > 0.0)
+         double cPH=FindPivotHigh(high,pb,InpSwingLookback,InpSwingLookback,rates_total);
+         double cPL=FindPivotLow(low,pb,InpSwingLookback,InpSwingLookback,rates_total);
+         if(cPH>0.0)
          {
-            datetime st = time[pivotBar];
-            int ei = pivotBar + InpLevelExtend;
-            datetime et;
-            if(ei <= lastBar)
-               et = time[ei];
-            else
-               et = time[lastBar] + (datetime)((ei - lastBar) * PeriodSeconds());
-            CreateKeyLevel(true, curPH, st, et);
+            datetime s1=time[pb];
+            int ei=pb+InpLevelExtend;
+            datetime e1t;
+            if(ei<=lastBar) e1t=time[ei];
+            else e1t=time[lastBar]+(datetime)((ei-lastBar)*PeriodSeconds());
+            MakeKeyLevel(true,cPH,s1,e1t);
          }
-         if(curPL > 0.0)
+         if(cPL>0.0)
          {
-            datetime st = time[pivotBar];
-            int ei = pivotBar + InpLevelExtend;
-            datetime et;
-            if(ei <= lastBar)
-               et = time[ei];
-            else
-               et = time[lastBar] + (datetime)((ei - lastBar) * PeriodSeconds());
-            CreateKeyLevel(false, curPL, st, et);
+            datetime s2=time[pb];
+            int ei2=pb+InpLevelExtend;
+            datetime e2t;
+            if(ei2<=lastBar) e2t=time[ei2];
+            else e2t=time[lastBar]+(datetime)((ei2-lastBar)*PeriodSeconds());
+            MakeKeyLevel(false,cPL,s2,e2t);
          }
       }
    }
