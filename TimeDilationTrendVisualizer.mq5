@@ -10,8 +10,9 @@
 #property strict
 #property indicator_chart_window
 
-#property indicator_buffers 20
-#property indicator_plots   11
+// バッファ数: 14(リボン) + 2(シグナル) + 5(カラーキャンドル=4data+1color) = 21
+#property indicator_buffers 21
+#property indicator_plots   10
 
 //--- Plot 1-7: EMAリボン fill用ペア (DRAW_FILLING x 7)
 #property indicator_label1  "Ribbon1_2"
@@ -70,19 +71,12 @@
 #property indicator_style9  STYLE_SOLID
 #property indicator_width9  4
 
-//--- Plot 10: ローソク足カラー用 (DRAW_COLOR_CANDLES)
+//--- Plot 10: ローソク足カラー用 (DRAW_COLOR_CANDLES = 4data + 1color)
 #property indicator_label10 "ColorCandle"
 #property indicator_type10  DRAW_COLOR_CANDLES
 #property indicator_color10 C'0,230,118',C'255,82,82',C'96,96,96'
 #property indicator_style10 STYLE_SOLID
 #property indicator_width10 1
-
-//--- Plot 11: キーレベルマーカー(非表示、内部管理用)
-#property indicator_label11 "KeyLevel"
-#property indicator_type11  DRAW_NONE
-#property indicator_color11 clrNONE
-#property indicator_style11 STYLE_SOLID
-#property indicator_width11 0
 
 //+------------------------------------------------------------------+
 //| 入力パラメーター                                                    |
@@ -127,17 +121,18 @@ double g_ema7b[], g_ema8[];  // fill 7: EMA7-EMA8
 // シグナルバッファ
 double g_bullSignal[], g_bearSignal[];
 
-// ローソク足カラーバッファ
+// ローソク足カラーバッファ (4 data + 1 color index)
 double g_candleOpen[], g_candleHigh[], g_candleLow[], g_candleClose[];
 double g_candleColor[];
-
-// キーレベルバッファ（ダミー）
-double g_keyLevel[];
 
 // EMAインジケーターハンドル
 int g_hEMA[8];
 
-// MTF用ハンドル（5min, 15min, 1H 各時間足のスイングH/L検出用）
+// EMAデータ取得用の個別配列（MQL5は2D動的配列不可のため）
+double g_emaD0[], g_emaD1[], g_emaD2[], g_emaD3[];
+double g_emaD4[], g_emaD5[], g_emaD6[], g_emaD7[];
+
+// MTF用（5min, 15min, 1H）
 ENUM_TIMEFRAMES g_mtfPeriods[3] = {PERIOD_M5, PERIOD_M15, PERIOD_H1};
 string g_mtfLabels[3] = {"5Min", "15Min", "1H"};
 
@@ -150,7 +145,7 @@ struct StructureState
    double lastSL;
    int    trend;  // 1=up, -1=down, 0=neutral
 };
-StructureState g_structState[3]; // 5min, 15min, 1H
+StructureState g_structState[3];
 
 // マスタートレンド
 int g_masterTrend;
@@ -171,50 +166,45 @@ int g_lastMSS_Bull[3], g_lastMSS_Bear[3];
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   // --- バッファ設定 ---
-   // Fill 1: EMA1-EMA2
+   // --- バッファ設定 (合計21バッファ) ---
+   // Fill 1: EMA1-EMA2 (buf 0,1)
    SetIndexBuffer(0,  g_ema1,   INDICATOR_DATA);
    SetIndexBuffer(1,  g_ema2a,  INDICATOR_DATA);
-   // Fill 2: EMA2-EMA3
+   // Fill 2: EMA2-EMA3 (buf 2,3)
    SetIndexBuffer(2,  g_ema2b,  INDICATOR_DATA);
    SetIndexBuffer(3,  g_ema3a,  INDICATOR_DATA);
-   // Fill 3: EMA3-EMA4
+   // Fill 3: EMA3-EMA4 (buf 4,5)
    SetIndexBuffer(4,  g_ema3b,  INDICATOR_DATA);
    SetIndexBuffer(5,  g_ema4a,  INDICATOR_DATA);
-   // Fill 4: EMA4-EMA5
+   // Fill 4: EMA4-EMA5 (buf 6,7)
    SetIndexBuffer(6,  g_ema4b,  INDICATOR_DATA);
    SetIndexBuffer(7,  g_ema5a,  INDICATOR_DATA);
-   // Fill 5: EMA5-EMA6
+   // Fill 5: EMA5-EMA6 (buf 8,9)
    SetIndexBuffer(8,  g_ema5b,  INDICATOR_DATA);
    SetIndexBuffer(9,  g_ema6a,  INDICATOR_DATA);
-   // Fill 6: EMA6-EMA7
+   // Fill 6: EMA6-EMA7 (buf 10,11)
    SetIndexBuffer(10, g_ema6b,  INDICATOR_DATA);
    SetIndexBuffer(11, g_ema7a,  INDICATOR_DATA);
-   // Fill 7: EMA7-EMA8
+   // Fill 7: EMA7-EMA8 (buf 12,13)
    SetIndexBuffer(12, g_ema7b,  INDICATOR_DATA);
    SetIndexBuffer(13, g_ema8,   INDICATOR_DATA);
 
-   // BULLシグナル
+   // BULLシグナル (buf 14)
    SetIndexBuffer(14, g_bullSignal, INDICATOR_DATA);
-   PlotIndexSetInteger(7, PLOT_ARROW, 159);  // 大きい丸
+   PlotIndexSetInteger(7, PLOT_ARROW, 159);
    PlotIndexSetDouble(7, PLOT_EMPTY_VALUE, EMPTY_VALUE);
 
-   // BEARシグナル
+   // BEARシグナル (buf 15)
    SetIndexBuffer(15, g_bearSignal, INDICATOR_DATA);
-   PlotIndexSetInteger(8, PLOT_ARROW, 159);  // 大きい丸
+   PlotIndexSetInteger(8, PLOT_ARROW, 159);
    PlotIndexSetDouble(8, PLOT_EMPTY_VALUE, EMPTY_VALUE);
 
-   // ローソク足カラー (DRAW_COLOR_CANDLES = 4data + 1color)
+   // ローソク足カラー (buf 16-20: 4data + 1color)
    SetIndexBuffer(16, g_candleOpen,  INDICATOR_DATA);
    SetIndexBuffer(17, g_candleHigh,  INDICATOR_DATA);
    SetIndexBuffer(18, g_candleLow,   INDICATOR_DATA);
    SetIndexBuffer(19, g_candleClose, INDICATOR_DATA);
-   // カラーインデックスバッファは自動的に割り当て
-   // DRAW_COLOR_CANDLESは5バッファ必要だが、indicator_buffers 20に収めるため
-   // Plot 11のDRAW_NONEをカラーバッファとして利用
-   // → 実際にはDRAW_COLOR_CANDLESは内部で color buffer を自動管理
-
-   // ※ indicator_buffers を21に変更する必要あり → 下記で対応
+   SetIndexBuffer(20, g_candleColor, INDICATOR_COLOR_INDEX);
 
    // EMAインジケーターハンドル作成
    int emaLengths[8];
@@ -262,10 +252,8 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
-   // オブジェクト全削除
    ObjectsDeleteAll(0, g_prefix);
 
-   // EMAハンドル解放
    for(int i = 0; i < 8; i++)
    {
       if(g_hEMA[i] != INVALID_HANDLE)
@@ -344,7 +332,6 @@ void GetMTFPivots(ENUM_TIMEFRAMES tf, int lookback,
 
    outClose = closes[copiedC - 1];
 
-   // 最新の確定ピボット（rightBars分だけ過去にずらす）
    int checkBar = copiedH - 1 - lookback;
    if(checkBar < lookback) return;
 
@@ -382,7 +369,6 @@ void UpdateStructure(int tfIdx, double pivotHigh, double pivotLow, double closeP
    double lastSL = g_structState[tfIdx].lastSL;
    double prevSH = g_structState[tfIdx].prevSH;
    double prevSL = g_structState[tfIdx].prevSL;
-   int    trend  = g_structState[tfIdx].trend;
 
    // トレンド判定（HH+HL=上昇、LL+LH=下降）
    if(lastSH > 0 && prevSH > 0 && lastSL > 0 && prevSL > 0)
@@ -393,7 +379,7 @@ void UpdateStructure(int tfIdx, double pivotHigh, double pivotLow, double closeP
          g_structState[tfIdx].trend = -1;
    }
 
-   trend = g_structState[tfIdx].trend;
+   int trend = g_structState[tfIdx].trend;
 
    // BOS検出（トレンド継続方向のブレイク）
    if(trend == 1 && lastSH > 0 && closePrice > lastSH)
@@ -417,16 +403,15 @@ void UpdateStructure(int tfIdx, double pivotHigh, double pivotLow, double closeP
 //+------------------------------------------------------------------+
 //| CreateBOSLabel - BOS/MSSラベルをチャート上に描画                      |
 //+------------------------------------------------------------------+
-void CreateBOSLabel(string tag, datetime time, double price,
+void CreateBOSLabel(string tag, datetime timeVal, double price,
                     string text, color clr, bool isAbove)
 {
    string name = g_prefix + tag;
 
-   // 既に存在していたら削除
    if(ObjectFind(0, name) >= 0)
       ObjectDelete(0, name);
 
-   ObjectCreate(0, name, OBJ_TEXT, 0, time, price);
+   ObjectCreate(0, name, OBJ_TEXT, 0, timeVal, price);
    ObjectSetString(0, name, OBJPROP_TEXT, text);
    ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
    ObjectSetInteger(0, name, OBJPROP_FONTSIZE, 8);
@@ -449,17 +434,18 @@ void CreateKeyLevel(bool isHigh, double price, datetime startTime, datetime endT
       name = g_prefix + "HL_" + IntegerToString(g_highLevelCount);
       clr  = C'0,229,255';  // シアン (#00E5FF)
 
-      ArrayResize(g_highLevelNames, ArraySize(g_highLevelNames) + 1);
-      g_highLevelNames[ArraySize(g_highLevelNames) - 1] = name;
+      int sz = ArraySize(g_highLevelNames);
+      ArrayResize(g_highLevelNames, sz + 1);
+      g_highLevelNames[sz] = name;
 
-      // 古いレベルを削除
-      if(ArraySize(g_highLevelNames) > InpMaxLevels)
+      // 古いレベルを削除（MaxLevels超過分）
+      while(ArraySize(g_highLevelNames) > InpMaxLevels)
       {
          ObjectDelete(0, g_highLevelNames[0]);
-         int sz = ArraySize(g_highLevelNames);
-         for(int i = 0; i < sz - 1; i++)
+         int arrSz = ArraySize(g_highLevelNames);
+         for(int i = 0; i < arrSz - 1; i++)
             g_highLevelNames[i] = g_highLevelNames[i + 1];
-         ArrayResize(g_highLevelNames, sz - 1);
+         ArrayResize(g_highLevelNames, arrSz - 1);
       }
    }
    else
@@ -468,16 +454,17 @@ void CreateKeyLevel(bool isHigh, double price, datetime startTime, datetime endT
       name = g_prefix + "LL_" + IntegerToString(g_lowLevelCount);
       clr  = C'255,64,129';  // マゼンタ/ピンク (#FF4081)
 
-      ArrayResize(g_lowLevelNames, ArraySize(g_lowLevelNames) + 1);
-      g_lowLevelNames[ArraySize(g_lowLevelNames) - 1] = name;
+      int sz = ArraySize(g_lowLevelNames);
+      ArrayResize(g_lowLevelNames, sz + 1);
+      g_lowLevelNames[sz] = name;
 
-      if(ArraySize(g_lowLevelNames) > InpMaxLevels)
+      while(ArraySize(g_lowLevelNames) > InpMaxLevels)
       {
          ObjectDelete(0, g_lowLevelNames[0]);
-         int sz = ArraySize(g_lowLevelNames);
-         for(int i = 0; i < sz - 1; i++)
+         int arrSz = ArraySize(g_lowLevelNames);
+         for(int i = 0; i < arrSz - 1; i++)
             g_lowLevelNames[i] = g_lowLevelNames[i + 1];
-         ArrayResize(g_lowLevelNames, sz - 1);
+         ArrayResize(g_lowLevelNames, arrSz - 1);
       }
    }
 
@@ -491,6 +478,22 @@ void CreateKeyLevel(bool isHigh, double price, datetime startTime, datetime endT
    ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT, false);
    ObjectSetInteger(0, name, OBJPROP_BACK, true);
    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+}
+
+//+------------------------------------------------------------------+
+//| CopyEMAData - 8本のEMAデータをそれぞれ個別配列にコピー                |
+//+------------------------------------------------------------------+
+bool CopyEMAData(int rates_total)
+{
+   if(CopyBuffer(g_hEMA[0], 0, 0, rates_total, g_emaD0) < rates_total) return(false);
+   if(CopyBuffer(g_hEMA[1], 0, 0, rates_total, g_emaD1) < rates_total) return(false);
+   if(CopyBuffer(g_hEMA[2], 0, 0, rates_total, g_emaD2) < rates_total) return(false);
+   if(CopyBuffer(g_hEMA[3], 0, 0, rates_total, g_emaD3) < rates_total) return(false);
+   if(CopyBuffer(g_hEMA[4], 0, 0, rates_total, g_emaD4) < rates_total) return(false);
+   if(CopyBuffer(g_hEMA[5], 0, 0, rates_total, g_emaD5) < rates_total) return(false);
+   if(CopyBuffer(g_hEMA[6], 0, 0, rates_total, g_emaD6) < rates_total) return(false);
+   if(CopyBuffer(g_hEMA[7], 0, 0, rates_total, g_emaD7) < rates_total) return(false);
+   return(true);
 }
 
 //+------------------------------------------------------------------+
@@ -512,24 +515,33 @@ int OnCalculate(const int rates_total,
    int start = (prev_calculated == 0) ? 0 : prev_calculated - 1;
 
    // ═══════════════════════════════════════════════════════════════
-   // COMPONENT A: EMA RIBBON
+   // EMAデータ取得（個別配列）
    // ═══════════════════════════════════════════════════════════════
+   ArraySetAsSeries(g_emaD0, false);
+   ArraySetAsSeries(g_emaD1, false);
+   ArraySetAsSeries(g_emaD2, false);
+   ArraySetAsSeries(g_emaD3, false);
+   ArraySetAsSeries(g_emaD4, false);
+   ArraySetAsSeries(g_emaD5, false);
+   ArraySetAsSeries(g_emaD6, false);
+   ArraySetAsSeries(g_emaD7, false);
 
-   // EMAデータ取得
-   double emaData[8][];
-   for(int e = 0; e < 8; e++)
-   {
-      ArraySetAsSeries(emaData[e], false);
-      if(CopyBuffer(g_hEMA[e], 0, 0, rates_total, emaData[e]) < rates_total)
-         return(0);
-   }
+   if(!CopyEMAData(rates_total))
+      return(0);
 
+   // ═══════════════════════════════════════════════════════════════
+   // COMPONENT A: EMA RIBBON + CANDLE COLORING
+   // ═══════════════════════════════════════════════════════════════
    for(int i = start; i < rates_total; i++)
    {
-      double e1 = emaData[0][i], e2 = emaData[1][i];
-      double e3 = emaData[2][i], e4 = emaData[3][i];
-      double e5 = emaData[4][i], e6 = emaData[5][i];
-      double e7 = emaData[6][i], e8 = emaData[7][i];
+      double e1 = g_emaD0[i];
+      double e2 = g_emaD1[i];
+      double e3 = g_emaD2[i];
+      double e4 = g_emaD3[i];
+      double e5 = g_emaD4[i];
+      double e6 = g_emaD5[i];
+      double e7 = g_emaD6[i];
+      double e8 = g_emaD7[i];
 
       // Fill 1: EMA1-EMA2
       g_ema1[i]  = e1;
@@ -553,17 +565,18 @@ int OnCalculate(const int rates_total,
       g_ema7b[i] = e7;
       g_ema8[i]  = e8;
 
-      // ═══════════════════════════════════════════════════════════
-      // CANDLE COLORING
-      // ═══════════════════════════════════════════════════════════
-      bool isBull = (e1 > e8);
-
+      // ローソク足カラーリング
       g_candleOpen[i]  = open[i];
       g_candleHigh[i]  = high[i];
       g_candleLow[i]   = low[i];
       g_candleClose[i] = close[i];
       // 0=Bull(緑), 1=Bear(赤), 2=ニュートラル(グレー)
-      // ※ DRAW_COLOR_CANDLESのカラーインデックス
+      if(e1 > e8)
+         g_candleColor[i] = 0;  // Bull: 緑
+      else if(e1 < e8)
+         g_candleColor[i] = 1;  // Bear: 赤
+      else
+         g_candleColor[i] = 2;  // Neutral: グレー
 
       // シグナル初期化
       g_bullSignal[i] = EMPTY_VALUE;
@@ -573,21 +586,18 @@ int OnCalculate(const int rates_total,
    // ═══════════════════════════════════════════════════════════════
    // COMPONENT B: MTF STRUCTURE DETECTION (BOS / MSS)
    // ═══════════════════════════════════════════════════════════════
-
-   // 最新バーでのみ構造検出を実行（リアルタイム処理）
    int lastBar = rates_total - 1;
 
    for(int tf = 0; tf < 3; tf++)
    {
-      // 表示フィルター
       if(tf == 0 && !InpShow5min)  continue;
       if(tf == 1 && !InpShow15min) continue;
       if(tf == 2 && !InpShow1H)    continue;
 
-      double ph, pl, cls;
+      double ph = 0, pl = 0, cls = 0;
       GetMTFPivots(g_mtfPeriods[tf], InpSwingLookback, ph, pl, cls);
 
-      bool bosBull, bosBear, mssBull, mssBear;
+      bool bosBull = false, bosBear = false, mssBull = false, mssBear = false;
       UpdateStructure(tf, ph, pl, cls, bosBull, bosBear, mssBull, mssBear);
 
       // BOS/MSSラベル描画（重複防止）
@@ -597,7 +607,7 @@ int OnCalculate(const int rates_total,
          string tag = "BOS_Bull_" + g_mtfLabels[tf] + "_" + IntegerToString(lastBar);
          CreateBOSLabel(tag, time[lastBar], low[lastBar],
                        "BOS\n" + g_mtfLabels[tf],
-                       C'0,230,118', false);  // 緑 #00E676
+                       C'0,230,118', false);
       }
 
       if(bosBear && g_lastBOS_Bear[tf] != lastBar)
@@ -606,7 +616,7 @@ int OnCalculate(const int rates_total,
          string tag = "BOS_Bear_" + g_mtfLabels[tf] + "_" + IntegerToString(lastBar);
          CreateBOSLabel(tag, time[lastBar], high[lastBar],
                        "BOS\n" + g_mtfLabels[tf],
-                       C'255,82,82', true);  // 赤 #FF5252
+                       C'255,82,82', true);
       }
 
       if(mssBull && g_lastMSS_Bull[tf] != lastBar)
@@ -615,7 +625,7 @@ int OnCalculate(const int rates_total,
          string tag = "MSS_Bull_" + g_mtfLabels[tf] + "_" + IntegerToString(lastBar);
          CreateBOSLabel(tag, time[lastBar], low[lastBar],
                        "MSS\n" + g_mtfLabels[tf],
-                       C'0,191,165', false);  // ティール #00BFA5
+                       C'0,191,165', false);
       }
 
       if(mssBear && g_lastMSS_Bear[tf] != lastBar)
@@ -624,15 +634,13 @@ int OnCalculate(const int rates_total,
          string tag = "MSS_Bear_" + g_mtfLabels[tf] + "_" + IntegerToString(lastBar);
          CreateBOSLabel(tag, time[lastBar], high[lastBar],
                        "MSS\n" + g_mtfLabels[tf],
-                       C'255,64,129', true);  // ピンク #FF4081
+                       C'255,64,129', true);
       }
    }
 
    // ═══════════════════════════════════════════════════════════════
    // COMPONENT C: BULL / BEAR TREND CHANGE SIGNALS
    // ═══════════════════════════════════════════════════════════════
-
-   // 各TFのトレンド合計カウント
    int bullCount = 0, bearCount = 0;
    for(int tf = 0; tf < 3; tf++)
    {
@@ -640,9 +648,9 @@ int OnCalculate(const int rates_total,
       if(g_structState[tf].trend == -1) bearCount++;
    }
 
-   // EMAリボン状態（EMA1 > EMA8）
-   double ema1Last = emaData[0][lastBar];
-   double ema8Last = emaData[7][lastBar];
+   // EMAリボン状態
+   double ema1Last = g_emaD0[lastBar];
+   double ema8Last = g_emaD7[lastBar];
    bool ribbonBull = (ema1Last > ema8Last);
 
    // 複合確認
@@ -651,25 +659,22 @@ int OnCalculate(const int rates_total,
 
    int newTrend = allBull ? 1 : (allBear ? -1 : g_masterTrend);
 
-   bool bullSignal = (newTrend == 1 && g_masterTrend != 1);
-   bool bearSignal = (newTrend == -1 && g_masterTrend != -1);
+   bool isBullSignal = (newTrend == 1 && g_masterTrend != 1);
+   bool isBearSignal = (newTrend == -1 && g_masterTrend != -1);
 
    g_masterTrend = newTrend;
 
-   // シグナル描画
-   if(bullSignal)
+   if(isBullSignal)
       g_bullSignal[lastBar] = low[lastBar];
 
-   if(bearSignal)
+   if(isBearSignal)
       g_bearSignal[lastBar] = high[lastBar];
 
    // ═══════════════════════════════════════════════════════════════
    // COMPONENT D: HORIZONTAL KEY LEVELS
    // ═══════════════════════════════════════════════════════════════
-
    if(InpShowLevels)
    {
-      // 現在時間足のピボット検出
       int pivotBar = lastBar - InpSwingLookback;
       if(pivotBar >= InpSwingLookback)
       {
@@ -680,11 +685,11 @@ int OnCalculate(const int rates_total,
          {
             datetime startT = time[pivotBar];
             int endIdx = pivotBar + InpLevelExtend;
-            if(endIdx >= rates_total) endIdx = rates_total - 1;
-            // 未来のバーの時間を推定
-            datetime endT = time[endIdx > lastBar ? lastBar : endIdx];
-            if(endIdx > lastBar)
-               endT = time[lastBar] + (endIdx - lastBar) * PeriodSeconds();
+            datetime endT;
+            if(endIdx <= lastBar)
+               endT = time[endIdx];
+            else
+               endT = time[lastBar] + (datetime)((endIdx - lastBar) * PeriodSeconds());
             CreateKeyLevel(true, curPH, startT, endT);
          }
 
@@ -692,10 +697,11 @@ int OnCalculate(const int rates_total,
          {
             datetime startT = time[pivotBar];
             int endIdx = pivotBar + InpLevelExtend;
-            if(endIdx >= rates_total) endIdx = rates_total - 1;
-            datetime endT = time[endIdx > lastBar ? lastBar : endIdx];
-            if(endIdx > lastBar)
-               endT = time[lastBar] + (endIdx - lastBar) * PeriodSeconds();
+            datetime endT;
+            if(endIdx <= lastBar)
+               endT = time[endIdx];
+            else
+               endT = time[lastBar] + (datetime)((endIdx - lastBar) * PeriodSeconds());
             CreateKeyLevel(false, curPL, startT, endT);
          }
       }
