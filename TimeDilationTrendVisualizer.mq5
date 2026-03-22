@@ -2,11 +2,11 @@
 //| TimeDilationTrendVisualizer.mq5                                  |
 //| Pine Script - Time Dilation Trend Visualizer [EZPZ]              |
 //| Components: EMA Ribbon, MTF Structure (BOS/MSS),                 |
-//|             BULL/BEAR Signals, Key Levels, Candle Coloring       |
+//|             BULL/BEAR Signals, Key Levels, Candle Coloring        |
 //+------------------------------------------------------------------+
 #property copyright "Time Dilation Trend Visualizer [EZPZ]"
 #property link      ""
-#property version   "1.00"
+#property version   "2.00"
 #property indicator_chart_window
 
 #property indicator_buffers 21
@@ -73,22 +73,22 @@
 #property indicator_width10 1
 
 //--- Inputs
-input int    InpEMA1  = 5;      // EMA 1 Length
-input int    InpEMA2  = 8;      // EMA 2 Length
-input int    InpEMA3  = 13;     // EMA 3 Length
-input int    InpEMA4  = 21;     // EMA 4 Length
-input int    InpEMA5  = 34;     // EMA 5 Length
-input int    InpEMA6  = 55;     // EMA 6 Length
-input int    InpEMA7  = 89;     // EMA 7 Length
-input int    InpEMA8  = 144;    // EMA 8 Length
-input int    InpSwingLookback = 10;  // Swing Lookback
-input bool   InpShow5min  = true;    // Show 5min Structure
-input bool   InpShow15min = true;    // Show 15min Structure
-input bool   InpShow1H    = true;    // Show 1H Structure
-input int    InpTrendConfirm = 2;    // Min TF Alignment (1-3)
-input bool   InpShowLevels   = true; // Show Key Levels
-input int    InpMaxLevels    = 3;    // Max Levels Per Side
-input int    InpLevelExtend  = 50;   // Level Extend (bars)
+input int    InpEMA1  = 5;
+input int    InpEMA2  = 8;
+input int    InpEMA3  = 13;
+input int    InpEMA4  = 21;
+input int    InpEMA5  = 34;
+input int    InpEMA6  = 55;
+input int    InpEMA7  = 89;
+input int    InpEMA8  = 144;
+input int    InpSwingLookback = 10;
+input bool   InpShow5min  = true;
+input bool   InpShow15min = true;
+input bool   InpShow1H    = true;
+input int    InpTrendConfirm = 2;
+input bool   InpShowLevels   = true;
+input int    InpMaxLevels    = 3;
+input int    InpLevelExtend  = 50;
 
 //--- Ribbon buffers (7 fills x 2 = 14)
 double g_ema1[];
@@ -105,48 +105,43 @@ double g_ema6b[];
 double g_ema7a[];
 double g_ema7b[];
 double g_ema8[];
+
 //--- Signal buffers
 double g_bullSignal[];
 double g_bearSignal[];
-//--- Candle color buffers (4 data + 1 color)
+
+//--- Candle color buffers
 double g_candleO[];
 double g_candleH[];
 double g_candleL[];
 double g_candleC[];
 double g_candleClr[];
+
 //--- EMA work arrays
-double g_ed0[];
-double g_ed1[];
-double g_ed2[];
-double g_ed3[];
-double g_ed4[];
-double g_ed5[];
-double g_ed6[];
-double g_ed7[];
+double g_ed0[], g_ed1[], g_ed2[], g_ed3[];
+double g_ed4[], g_ed5[], g_ed6[], g_ed7[];
+
 //--- EMA handles
 int g_hEMA[8];
-//--- MTF
+
+//--- MTF config
 ENUM_TIMEFRAMES g_mtfTF[3];
 string g_mtfName[3];
-//--- Structure state (parallel arrays instead of struct)
-double g_prevSH[3];
-double g_prevSL[3];
-double g_lastSH[3];
-double g_lastSL[3];
-int    g_trend[3];
+
+//--- Per-chart-bar trend for each HTF (for BULL/BEAR)
+double g_barTrend0[];
+double g_barTrend1[];
+double g_barTrend2[];
+
 //--- Master trend
 int g_masterTrend;
-//--- Key level management
+
+//--- Key levels
 string g_prefix;
 int    g_hiLvlCnt;
 int    g_loLvlCnt;
 string g_hiNames[];
 string g_loNames[];
-//--- Duplicate prevention
-int g_lBOSBu[3];
-int g_lBOSBe[3];
-int g_lMSSBu[3];
-int g_lMSSBe[3];
 
 //+------------------------------------------------------------------+
 int OnInit()
@@ -186,32 +181,14 @@ int OnInit()
    PlotIndexSetInteger(8, PLOT_ARROW, 159);
    PlotIndexSetDouble(8, PLOT_EMPTY_VALUE, EMPTY_VALUE);
 
-   g_hEMA[0] = iMA(_Symbol, PERIOD_CURRENT, InpEMA1, 0, MODE_EMA, PRICE_CLOSE);
-   g_hEMA[1] = iMA(_Symbol, PERIOD_CURRENT, InpEMA2, 0, MODE_EMA, PRICE_CLOSE);
-   g_hEMA[2] = iMA(_Symbol, PERIOD_CURRENT, InpEMA3, 0, MODE_EMA, PRICE_CLOSE);
-   g_hEMA[3] = iMA(_Symbol, PERIOD_CURRENT, InpEMA4, 0, MODE_EMA, PRICE_CLOSE);
-   g_hEMA[4] = iMA(_Symbol, PERIOD_CURRENT, InpEMA5, 0, MODE_EMA, PRICE_CLOSE);
-   g_hEMA[5] = iMA(_Symbol, PERIOD_CURRENT, InpEMA6, 0, MODE_EMA, PRICE_CLOSE);
-   g_hEMA[6] = iMA(_Symbol, PERIOD_CURRENT, InpEMA7, 0, MODE_EMA, PRICE_CLOSE);
-   g_hEMA[7] = iMA(_Symbol, PERIOD_CURRENT, InpEMA8, 0, MODE_EMA, PRICE_CLOSE);
+   int lens[8];
+   lens[0]=InpEMA1; lens[1]=InpEMA2; lens[2]=InpEMA3; lens[3]=InpEMA4;
+   lens[4]=InpEMA5; lens[5]=InpEMA6; lens[6]=InpEMA7; lens[7]=InpEMA8;
 
    for(int i = 0; i < 8; i++)
    {
-      if(g_hEMA[i] == INVALID_HANDLE)
-         return(INIT_FAILED);
-   }
-
-   for(int i = 0; i < 3; i++)
-   {
-      g_prevSH[i] = 0.0;
-      g_prevSL[i] = 0.0;
-      g_lastSH[i] = 0.0;
-      g_lastSL[i] = 0.0;
-      g_trend[i]  = 0;
-      g_lBOSBu[i] = -1;
-      g_lBOSBe[i] = -1;
-      g_lMSSBu[i] = -1;
-      g_lMSSBe[i] = -1;
+      g_hEMA[i] = iMA(_Symbol, PERIOD_CURRENT, lens[i], 0, MODE_EMA, PRICE_CLOSE);
+      if(g_hEMA[i] == INVALID_HANDLE) return(INIT_FAILED);
    }
 
    g_masterTrend = 0;
@@ -259,61 +236,32 @@ double FindPivotLow(const double &a[], int bar, int lb, int rb, int sz)
 }
 
 //+------------------------------------------------------------------+
-void GetMTFPivots(ENUM_TIMEFRAMES tf, int lb,
-                  double &oPH, double &oPL, double &oCls)
-{
-   oPH = 0.0; oPL = 0.0; oCls = 0.0;
-   int need = lb * 2 + 5;
-   double hi[], lo[], cl[];
-   ArraySetAsSeries(hi, false);
-   ArraySetAsSeries(lo, false);
-   ArraySetAsSeries(cl, false);
-   int cH = CopyHigh(_Symbol, tf, 0, need, hi);
-   int cL = CopyLow(_Symbol, tf, 0, need, lo);
-   int cC = CopyClose(_Symbol, tf, 0, need, cl);
-   if(cH < need || cL < need || cC < need) return;
-   oCls = cl[cC - 1];
-   int chk = cH - 1 - lb;
-   if(chk < lb) return;
-   oPH = FindPivotHigh(hi, chk, lb, lb, cH);
-   oPL = FindPivotLow(lo, chk, lb, lb, cL);
-}
-
-//+------------------------------------------------------------------+
-void DoStructure(int idx, double ph, double pl, double cls,
-                 bool &bBu, bool &bBe, bool &mBu, bool &mBe)
-{
-   bBu = false; bBe = false; mBu = false; mBe = false;
-   if(ph > 0.0) { g_prevSH[idx] = g_lastSH[idx]; g_lastSH[idx] = ph; }
-   if(pl > 0.0) { g_prevSL[idx] = g_lastSL[idx]; g_lastSL[idx] = pl; }
-   double lh = g_lastSH[idx]; double ll = g_lastSL[idx];
-   double ps = g_prevSH[idx]; double pl2 = g_prevSL[idx];
-   if(lh > 0.0 && ps > 0.0 && ll > 0.0 && pl2 > 0.0)
-   {
-      if(lh > ps && ll > pl2) g_trend[idx] = 1;
-      else if(lh < ps && ll < pl2) g_trend[idx] = -1;
-   }
-   int tr = g_trend[idx];
-   if(tr == 1 && lh > 0.0 && cls > lh) bBu = true;
-   if(tr == -1 && ll > 0.0 && cls < ll) bBe = true;
-   if(tr == -1 && lh > 0.0 && cls > lh) mBu = true;
-   if(tr == 1 && ll > 0.0 && cls < ll) mBe = true;
-   if(mBu) g_trend[idx] = 1;
-   if(mBe) g_trend[idx] = -1;
-}
-
-//+------------------------------------------------------------------+
-void MakeBOSLabel(string tag, datetime dt, double pr,
-                  string txt, color c, bool above)
+void CreateBOSLabel(string tag, datetime dt, double pr,
+                    string txt, color c, bool above)
 {
    string nm = g_prefix + tag;
-   if(ObjectFind(0, nm) >= 0) ObjectDelete(0, nm);
+   if(ObjectFind(0, nm) >= 0) return;
    ObjectCreate(0, nm, OBJ_TEXT, 0, dt, pr);
    ObjectSetString(0, nm, OBJPROP_TEXT, txt);
    ObjectSetInteger(0, nm, OBJPROP_COLOR, c);
-   ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, 8);
+   ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, 9);
    ObjectSetString(0, nm, OBJPROP_FONT, "Arial Bold");
-   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, above ? ANCHOR_LOWER : ANCHOR_UPPER);
+   ObjectSetInteger(0, nm, OBJPROP_ANCHOR,
+                    above ? ANCHOR_LOWER : ANCHOR_UPPER);
+}
+
+//+------------------------------------------------------------------+
+void CreateSignalLabel(string tag, datetime dt, double pr,
+                       string txt, color c)
+{
+   string nm = g_prefix + tag;
+   if(ObjectFind(0, nm) >= 0) return;
+   ObjectCreate(0, nm, OBJ_TEXT, 0, dt, pr);
+   ObjectSetString(0, nm, OBJPROP_TEXT, txt);
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, c);
+   ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, 14);
+   ObjectSetString(0, nm, OBJPROP_FONT, "Arial Bold");
+   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_CENTER);
 }
 
 //+------------------------------------------------------------------+
@@ -333,7 +281,7 @@ void MakeKeyLevel(bool isHi, double pr, datetime t1, datetime t2)
       {
          ObjectDelete(0, g_hiNames[0]);
          int n = ArraySize(g_hiNames);
-         for(int i = 0; i < n - 1; i++) g_hiNames[i] = g_hiNames[i+1];
+         for(int i = 0; i < n - 1; i++) g_hiNames[i] = g_hiNames[i + 1];
          ArrayResize(g_hiNames, n - 1);
       }
    }
@@ -349,7 +297,7 @@ void MakeKeyLevel(bool isHi, double pr, datetime t1, datetime t2)
       {
          ObjectDelete(0, g_loNames[0]);
          int n = ArraySize(g_loNames);
-         for(int i = 0; i < n - 1; i++) g_loNames[i] = g_loNames[i+1];
+         for(int i = 0; i < n - 1; i++) g_loNames[i] = g_loNames[i + 1];
          ArrayResize(g_loNames, n - 1);
       }
    }
@@ -364,7 +312,174 @@ void MakeKeyLevel(bool isHi, double pr, datetime t1, datetime t2)
 }
 
 //+------------------------------------------------------------------+
-//| NOTE: spread is const int& (NOT const long&) per MQL5 spec       |
+// Find chart bar index for a given time (binary search)
+//+------------------------------------------------------------------+
+int FindChartBar(const datetime &time[], int total, datetime target)
+{
+   if(total <= 0) return(0);
+   if(target <= time[0]) return(0);
+   if(target >= time[total - 1]) return(total - 1);
+   int lo = 0, hi = total - 1;
+   while(lo < hi)
+   {
+      int mid = (lo + hi + 1) / 2;
+      if(time[mid] <= target) lo = mid;
+      else hi = mid - 1;
+   }
+   return(lo);
+}
+
+//+------------------------------------------------------------------+
+// Process one HTF timeframe: detect BOS/MSS, store trend per HTF bar
+// Returns trend array mapped to chart bars
+//+------------------------------------------------------------------+
+void ProcessHTF(int tfIdx, int lb,
+                const datetime &chartTime[], const double &chartHigh[],
+                const double &chartLow[], int chartTotal,
+                bool fullRecalc, double &barTrend[])
+{
+   ENUM_TIMEFRAMES period = g_mtfTF[tfIdx];
+   int need = 3000;
+
+   double htfH[], htfL[], htfC[];
+   datetime htfT[];
+   ArraySetAsSeries(htfH, false);
+   ArraySetAsSeries(htfL, false);
+   ArraySetAsSeries(htfC, false);
+   ArraySetAsSeries(htfT, false);
+
+   int cntH = CopyHigh(_Symbol, period, 0, need, htfH);
+   int cntL = CopyLow(_Symbol, period, 0, need, htfL);
+   int cntC = CopyClose(_Symbol, period, 0, need, htfC);
+   int cntT = CopyTime(_Symbol, period, 0, need, htfT);
+   int cnt = MathMin(MathMin(cntH, cntL), MathMin(cntC, cntT));
+
+   if(cnt < 2 * lb + 2) return;
+
+   // Arrays for HTF bar trend
+   double htfTrend[];
+   ArrayResize(htfTrend, cnt);
+   ArrayInitialize(htfTrend, 0.0);
+
+   // Structure state
+   double prevSH = 0, prevSL = 0, lastSH = 0, lastSL = 0;
+   double lastSH_prev = 0, lastSL_prev = 0;
+   int trend = 0;
+
+   // Process all HTF bars chronologically
+   for(int j = 0; j < cnt; j++)
+   {
+      // Check for confirmed pivot (pivot at j-lb, confirmed at j)
+      double ph = 0, pl = 0;
+      if(j >= 2 * lb)
+      {
+         ph = FindPivotHigh(htfH, j - lb, lb, lb, cnt);
+         pl = FindPivotLow(htfL, j - lb, lb, lb, cnt);
+      }
+
+      // Update swing levels
+      if(ph > 0) { prevSH = lastSH; lastSH = ph; }
+      if(pl > 0) { prevSL = lastSL; lastSL = pl; }
+
+      // Determine trend
+      if(lastSH > 0 && prevSH > 0 && lastSL > 0 && prevSL > 0)
+      {
+         if(lastSH > prevSH && lastSL > prevSL) trend = 1;
+         else if(lastSH < prevSH && lastSL < prevSL) trend = -1;
+      }
+
+      // Crossover detection (ta.crossover / ta.crossunder equivalent)
+      bool bBu = false, bBe = false, mBu = false, mBe = false;
+
+      if(j > 0)
+      {
+         double cls = htfC[j];
+         double prevCls = htfC[j - 1];
+
+         // crossover(close, lastSH): close > lastSH AND prevClose <= lastSH_prev
+         bool crossOverSH = (lastSH > 0 && lastSH_prev > 0
+                             && cls > lastSH && prevCls <= lastSH_prev);
+         // crossunder(close, lastSL): close < lastSL AND prevClose >= lastSL_prev
+         bool crossUnderSL = (lastSL > 0 && lastSL_prev > 0
+                              && cls < lastSL && prevCls >= lastSL_prev);
+
+         if(trend == 1 && crossOverSH)  bBu = true;
+         if(trend == -1 && crossUnderSL) bBe = true;
+         if(trend == -1 && crossOverSH) mBu = true;
+         if(trend == 1 && crossUnderSL) mBe = true;
+      }
+
+      // Update trend on MSS
+      if(mBu) trend = 1;
+      if(mBe) trend = -1;
+
+      htfTrend[j] = (double)trend;
+
+      // Store for next iteration's crossover check
+      lastSH_prev = lastSH;
+      lastSL_prev = lastSL;
+
+      // Create BOS/MSS labels (limit to recent bars)
+      if(fullRecalc && j > cnt - 500)
+      {
+         // Find chart bar for this HTF bar time
+         int cb = FindChartBar(chartTime, chartTotal, htfT[j]);
+         string timeSuffix = IntegerToString((long)htfT[j]);
+         string tfName = g_mtfName[tfIdx];
+
+         if(bBu)
+            CreateBOSLabel("BBu" + tfName + timeSuffix,
+               chartTime[cb], chartLow[cb],
+               "BOS\n" + tfName, C'0,230,118', false);
+         if(bBe)
+            CreateBOSLabel("BBe" + tfName + timeSuffix,
+               chartTime[cb], chartHigh[cb],
+               "BOS\n" + tfName, C'255,82,82', true);
+         if(mBu)
+            CreateBOSLabel("MBu" + tfName + timeSuffix,
+               chartTime[cb], chartLow[cb],
+               "MSS\n" + tfName, C'0,191,165', false);
+         if(mBe)
+            CreateBOSLabel("MBe" + tfName + timeSuffix,
+               chartTime[cb], chartHigh[cb],
+               "MSS\n" + tfName, C'255,64,129', true);
+      }
+      else if(!fullRecalc && j >= cnt - 3)
+      {
+         // Incremental: only check latest HTF bars
+         int cb = FindChartBar(chartTime, chartTotal, htfT[j]);
+         string timeSuffix = IntegerToString((long)htfT[j]);
+         string tfName = g_mtfName[tfIdx];
+
+         if(bBu)
+            CreateBOSLabel("BBu" + tfName + timeSuffix,
+               chartTime[cb], chartLow[cb],
+               "BOS\n" + tfName, C'0,230,118', false);
+         if(bBe)
+            CreateBOSLabel("BBe" + tfName + timeSuffix,
+               chartTime[cb], chartHigh[cb],
+               "BOS\n" + tfName, C'255,82,82', true);
+         if(mBu)
+            CreateBOSLabel("MBu" + tfName + timeSuffix,
+               chartTime[cb], chartLow[cb],
+               "MSS\n" + tfName, C'0,191,165', false);
+         if(mBe)
+            CreateBOSLabel("MBe" + tfName + timeSuffix,
+               chartTime[cb], chartHigh[cb],
+               "MSS\n" + tfName, C'255,64,129', true);
+      }
+   }
+
+   // Map HTF trend to chart bars using pointer advancement
+   int htfPtr = 0;
+   for(int i = 0; i < chartTotal; i++)
+   {
+      while(htfPtr + 1 < cnt && htfT[htfPtr + 1] <= chartTime[i])
+         htfPtr++;
+      barTrend[i] = htfTrend[htfPtr];
+   }
+}
+
 //+------------------------------------------------------------------+
 int OnCalculate(const int rates_total,
                 const int prev_calculated,
@@ -380,15 +495,14 @@ int OnCalculate(const int rates_total,
    if(rates_total < InpEMA8 + 10) return(0);
 
    int start = (prev_calculated == 0) ? 0 : prev_calculated - 1;
+   bool fullRecalc = (prev_calculated == 0);
+   bool newBar = (prev_calculated > 0 && prev_calculated < rates_total);
 
-   ArraySetAsSeries(g_ed0, false);
-   ArraySetAsSeries(g_ed1, false);
-   ArraySetAsSeries(g_ed2, false);
-   ArraySetAsSeries(g_ed3, false);
-   ArraySetAsSeries(g_ed4, false);
-   ArraySetAsSeries(g_ed5, false);
-   ArraySetAsSeries(g_ed6, false);
-   ArraySetAsSeries(g_ed7, false);
+   //=== Phase 1: Copy EMA data ===
+   ArraySetAsSeries(g_ed0, false); ArraySetAsSeries(g_ed1, false);
+   ArraySetAsSeries(g_ed2, false); ArraySetAsSeries(g_ed3, false);
+   ArraySetAsSeries(g_ed4, false); ArraySetAsSeries(g_ed5, false);
+   ArraySetAsSeries(g_ed6, false); ArraySetAsSeries(g_ed7, false);
 
    if(CopyBuffer(g_hEMA[0],0,0,rates_total,g_ed0)<rates_total) return(0);
    if(CopyBuffer(g_hEMA[1],0,0,rates_total,g_ed1)<rates_total) return(0);
@@ -399,114 +513,141 @@ int OnCalculate(const int rates_total,
    if(CopyBuffer(g_hEMA[6],0,0,rates_total,g_ed6)<rates_total) return(0);
    if(CopyBuffer(g_hEMA[7],0,0,rates_total,g_ed7)<rates_total) return(0);
 
+   //=== Phase 1b: Fill ribbon + candle buffers ===
    for(int i = start; i < rates_total; i++)
    {
-      double e1=g_ed0[i]; double e2=g_ed1[i]; double e3=g_ed2[i]; double e4=g_ed3[i];
-      double e5=g_ed4[i]; double e6=g_ed5[i]; double e7=g_ed6[i]; double e8=g_ed7[i];
+      double e1=g_ed0[i], e2=g_ed1[i], e3=g_ed2[i], e4=g_ed3[i];
+      double e5=g_ed4[i], e6=g_ed5[i], e7=g_ed6[i], e8=g_ed7[i];
 
-      g_ema1[i]=e1;  g_ema2a[i]=e2;
-      g_ema2b[i]=e2; g_ema3a[i]=e3;
-      g_ema3b[i]=e3; g_ema4a[i]=e4;
-      g_ema4b[i]=e4; g_ema5a[i]=e5;
-      g_ema5b[i]=e5; g_ema6a[i]=e6;
-      g_ema6b[i]=e6; g_ema7a[i]=e7;
-      g_ema7b[i]=e7; g_ema8[i]=e8;
+      g_ema1[i]=e1;   g_ema2a[i]=e2;
+      g_ema2b[i]=e2;  g_ema3a[i]=e3;
+      g_ema3b[i]=e3;  g_ema4a[i]=e4;
+      g_ema4b[i]=e4;  g_ema5a[i]=e5;
+      g_ema5b[i]=e5;  g_ema6a[i]=e6;
+      g_ema6b[i]=e6;  g_ema7a[i]=e7;
+      g_ema7b[i]=e7;  g_ema8[i]=e8;
 
       g_candleO[i]=open[i];
       g_candleH[i]=high[i];
       g_candleL[i]=low[i];
       g_candleC[i]=close[i];
-      if(e1>e8)      g_candleClr[i]=0.0;
-      else if(e1<e8) g_candleClr[i]=1.0;
-      else           g_candleClr[i]=2.0;
-
-      g_bullSignal[i]=EMPTY_VALUE;
-      g_bearSignal[i]=EMPTY_VALUE;
+      if(e1 > e8)      g_candleClr[i] = 0.0;
+      else if(e1 < e8) g_candleClr[i] = 1.0;
+      else              g_candleClr[i] = 2.0;
    }
 
-   int lastBar = rates_total - 1;
-
-   for(int tf=0; tf<3; tf++)
+   //=== Phase 2-4: MTF Structure + Signals (on full recalc or new bar) ===
+   if(fullRecalc || newBar)
    {
-      if(tf==0 && !InpShow5min)  continue;
-      if(tf==1 && !InpShow15min) continue;
-      if(tf==2 && !InpShow1H)    continue;
+      // Clear all signal buffers
+      ArrayInitialize(g_bullSignal, EMPTY_VALUE);
+      ArrayInitialize(g_bearSignal, EMPTY_VALUE);
 
-      double ph=0.0, pl=0.0, cls=0.0;
-      GetMTFPivots(g_mtfTF[tf], InpSwingLookback, ph, pl, cls);
-
-      bool bBu=false, bBe=false, mBu=false, mBe=false;
-      DoStructure(tf, ph, pl, cls, bBu, bBe, mBu, mBe);
-
-      if(bBu && g_lBOSBu[tf]!=lastBar)
+      if(fullRecalc)
       {
-         g_lBOSBu[tf]=lastBar;
-         MakeBOSLabel("BBu"+g_mtfName[tf]+IntegerToString(lastBar),
-                      time[lastBar],low[lastBar],"BOS "+g_mtfName[tf],C'0,230,118',false);
+         ObjectsDeleteAll(0, g_prefix);
+         g_hiLvlCnt = 0;
+         g_loLvlCnt = 0;
+         ArrayResize(g_hiNames, 0);
+         ArrayResize(g_loNames, 0);
       }
-      if(bBe && g_lBOSBe[tf]!=lastBar)
-      {
-         g_lBOSBe[tf]=lastBar;
-         MakeBOSLabel("BBe"+g_mtfName[tf]+IntegerToString(lastBar),
-                      time[lastBar],high[lastBar],"BOS "+g_mtfName[tf],C'255,82,82',true);
-      }
-      if(mBu && g_lMSSBu[tf]!=lastBar)
-      {
-         g_lMSSBu[tf]=lastBar;
-         MakeBOSLabel("MBu"+g_mtfName[tf]+IntegerToString(lastBar),
-                      time[lastBar],low[lastBar],"MSS "+g_mtfName[tf],C'0,191,165',false);
-      }
-      if(mBe && g_lMSSBe[tf]!=lastBar)
-      {
-         g_lMSSBe[tf]=lastBar;
-         MakeBOSLabel("MBe"+g_mtfName[tf]+IntegerToString(lastBar),
-                      time[lastBar],high[lastBar],"MSS "+g_mtfName[tf],C'255,64,129',true);
-      }
-   }
 
-   int buCnt=0, beCnt=0;
-   for(int tf=0; tf<3; tf++)
-   {
-      if(g_trend[tf]==1)  buCnt++;
-      if(g_trend[tf]==-1) beCnt++;
-   }
-   bool rBull = (g_ed0[lastBar] > g_ed7[lastBar]);
-   bool aBull = (buCnt>=InpTrendConfirm) && rBull;
-   bool aBear = (beCnt>=InpTrendConfirm) && !rBull;
-   int nT;
-   if(aBull) nT=1;
-   else if(aBear) nT=-1;
-   else nT=g_masterTrend;
-   if(nT==1 && g_masterTrend!=1) g_bullSignal[lastBar]=low[lastBar];
-   if(nT==-1 && g_masterTrend!=-1) g_bearSignal[lastBar]=high[lastBar];
-   g_masterTrend=nT;
+      // Resize per-bar trend arrays
+      ArrayResize(g_barTrend0, rates_total);
+      ArrayResize(g_barTrend1, rates_total);
+      ArrayResize(g_barTrend2, rates_total);
+      ArrayInitialize(g_barTrend0, 0.0);
+      ArrayInitialize(g_barTrend1, 0.0);
+      ArrayInitialize(g_barTrend2, 0.0);
 
-   if(InpShowLevels)
-   {
-      int pb=lastBar-InpSwingLookback;
-      if(pb>=InpSwingLookback)
+      //=== Phase 2: Process each HTF for BOS/MSS ===
+      int lb = InpSwingLookback;
+
+      if(InpShow5min)
+         ProcessHTF(0, lb, time, high, low, rates_total,
+                    fullRecalc, g_barTrend0);
+      if(InpShow15min)
+         ProcessHTF(1, lb, time, high, low, rates_total,
+                    fullRecalc, g_barTrend1);
+      if(InpShow1H)
+         ProcessHTF(2, lb, time, high, low, rates_total,
+                    fullRecalc, g_barTrend2);
+
+      //=== Phase 3: BULL/BEAR signals (historical) ===
+      int prevMaster = 0;
+      int startSig = InpEMA8 + 10;
+
+      for(int i = startSig; i < rates_total; i++)
       {
-         double cPH=FindPivotHigh(high,pb,InpSwingLookback,InpSwingLookback,rates_total);
-         double cPL=FindPivotLow(low,pb,InpSwingLookback,InpSwingLookback,rates_total);
-         if(cPH>0.0)
+         int buCnt = 0, beCnt = 0;
+         if((int)g_barTrend0[i] == 1)  buCnt++;
+         if((int)g_barTrend0[i] == -1) beCnt++;
+         if((int)g_barTrend1[i] == 1)  buCnt++;
+         if((int)g_barTrend1[i] == -1) beCnt++;
+         if((int)g_barTrend2[i] == 1)  buCnt++;
+         if((int)g_barTrend2[i] == -1) beCnt++;
+
+         bool rBull = (g_ed0[i] > g_ed7[i]);
+         bool aBull = (buCnt >= InpTrendConfirm) && rBull;
+         bool aBear = (beCnt >= InpTrendConfirm) && !rBull;
+
+         int nT;
+         if(aBull) nT = 1;
+         else if(aBear) nT = -1;
+         else nT = prevMaster;
+
+         if(nT == 1 && prevMaster != 1)
          {
-            datetime s1=time[pb];
-            int ei=pb+InpLevelExtend;
-            datetime e1t;
-            if(ei<=lastBar) e1t=time[ei];
-            else e1t=time[lastBar]+(datetime)((ei-lastBar)*PeriodSeconds());
-            MakeKeyLevel(true,cPH,s1,e1t);
+            g_bullSignal[i] = low[i];
+            CreateSignalLabel("BULL" + IntegerToString(i),
+               time[i], low[i] - (high[i] - low[i]) * 1.5,
+               "BULL", C'0,230,118');
          }
-         if(cPL>0.0)
+         if(nT == -1 && prevMaster != -1)
          {
-            datetime s2=time[pb];
-            int ei2=pb+InpLevelExtend;
-            datetime e2t;
-            if(ei2<=lastBar) e2t=time[ei2];
-            else e2t=time[lastBar]+(datetime)((ei2-lastBar)*PeriodSeconds());
-            MakeKeyLevel(false,cPL,s2,e2t);
+            g_bearSignal[i] = high[i];
+            CreateSignalLabel("BEAR" + IntegerToString(i),
+               time[i], high[i] + (high[i] - low[i]) * 1.5,
+               "BEAR", C'255,23,68');
+         }
+
+         prevMaster = nT;
+      }
+      g_masterTrend = prevMaster;
+
+      //=== Phase 4: Key Levels ===
+      if(InpShowLevels && fullRecalc)
+      {
+         int lastBar = rates_total - 1;
+         int keyStart = MathMax(lb, lastBar - 500);
+
+         for(int i = keyStart; i <= lastBar - lb; i++)
+         {
+            double cPH = FindPivotHigh(high, i, lb, lb, rates_total);
+            double cPL = FindPivotLow(low, i, lb, lb, rates_total);
+
+            if(cPH > 0.0)
+            {
+               datetime t1 = time[i];
+               int ei = i + InpLevelExtend;
+               datetime t2;
+               if(ei <= lastBar) t2 = time[ei];
+               else t2 = time[lastBar] + (datetime)((ei - lastBar) * PeriodSeconds());
+               MakeKeyLevel(true, cPH, t1, t2);
+            }
+            if(cPL > 0.0)
+            {
+               datetime t1 = time[i];
+               int ei = i + InpLevelExtend;
+               datetime t2;
+               if(ei <= lastBar) t2 = time[ei];
+               else t2 = time[lastBar] + (datetime)((ei - lastBar) * PeriodSeconds());
+               MakeKeyLevel(false, cPL, t1, t2);
+            }
          }
       }
+
+      ChartRedraw();
    }
 
    return(rates_total);
