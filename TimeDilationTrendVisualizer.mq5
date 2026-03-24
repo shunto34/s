@@ -6,7 +6,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Time Dilation Trend Visualizer [EZPZ]"
 #property link      ""
-#property version   "3.10"
+#property version   "3.20"
 #property indicator_chart_window
 
 #property indicator_buffers 21
@@ -58,13 +58,13 @@
 #property indicator_type8   DRAW_ARROW
 #property indicator_color8  C'0,220,120'
 #property indicator_style8  STYLE_SOLID
-#property indicator_width8  5
+#property indicator_width8  9
 
 #property indicator_label9  "BEAR"
 #property indicator_type9   DRAW_ARROW
 #property indicator_color9  C'255,70,70'
 #property indicator_style9  STYLE_SOLID
-#property indicator_width9  5
+#property indicator_width9  9
 
 #property indicator_label10 "ColorCandle"
 #property indicator_type10  DRAW_COLOR_CANDLES
@@ -205,7 +205,7 @@ int OnInit()
    CreateUI();
    CreateWatermark();
 
-   IndicatorSetString(INDICATOR_SHORTNAME, "TDTV [FAD]");
+   IndicatorSetString(INDICATOR_SHORTNAME, "[FAD]TimeDilationTrendVisualizer");
    return(INIT_SUCCEEDED);
 }
 
@@ -266,7 +266,7 @@ void CreateWatermark()
    ObjectSetInteger(0, nm, OBJPROP_YDISTANCE, chartH / 2);
    string tf = EnumToString(Period());
    StringReplace(tf, "PERIOD_", "");
-   ObjectSetString(0, nm, OBJPROP_TEXT, _Symbol + " " + tf + " | TDTV [FAD]");
+   ObjectSetString(0, nm, OBJPROP_TEXT, _Symbol + " " + tf + " | [FAD] TDTV");
    ObjectSetString(0, nm, OBJPROP_FONT, "Arial Bold");
    ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, 22);
    ObjectSetInteger(0, nm, OBJPROP_COLOR, C'50,50,60');
@@ -324,7 +324,22 @@ void CreateBOSLabel(string tag, datetime dt, double pr,
    ObjectCreate(0, nm, OBJ_TEXT, 0, dt, pr);
    ObjectSetString(0, nm, OBJPROP_TEXT, txt);
    ObjectSetInteger(0, nm, OBJPROP_COLOR, c);
-   ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, 7);
+   ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, 13);
+   ObjectSetString(0, nm, OBJPROP_FONT, "Arial Bold");
+   ObjectSetInteger(0, nm, OBJPROP_ANCHOR,
+                    above ? ANCHOR_LOWER : ANCHOR_UPPER);
+}
+
+//+------------------------------------------------------------------+
+void CreateSignalLabel(string tag, datetime dt, double pr,
+                       string txt, color c, bool above)
+{
+   string nm = g_prefix + tag;
+   if(ObjectFind(0, nm) >= 0) return;
+   ObjectCreate(0, nm, OBJ_TEXT, 0, dt, pr);
+   ObjectSetString(0, nm, OBJPROP_TEXT, txt);
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, c);
+   ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, 10);
    ObjectSetString(0, nm, OBJPROP_FONT, "Arial Bold");
    ObjectSetInteger(0, nm, OBJPROP_ANCHOR,
                     above ? ANCHOR_LOWER : ANCHOR_UPPER);
@@ -496,19 +511,19 @@ void ProcessHTF(int tfIdx, int lb,
          if(bBu)
             CreateBOSLabel("BBu" + tfName + timeSuffix,
                chartTime[cb], chartLow[cb],
-               "B", C'0,220,120', false);
+               "B", C'255,215,0', false);
          if(bBe)
             CreateBOSLabel("BBe" + tfName + timeSuffix,
                chartTime[cb], chartHigh[cb],
-               "B", C'230,85,85', true);
+               "B", C'255,165,0', true);
          if(mBu)
             CreateBOSLabel("MBu" + tfName + timeSuffix,
                chartTime[cb], chartLow[cb],
-               "M", C'0,185,150', false);
+               "M", C'0,255,255', false);
          if(mBe)
             CreateBOSLabel("MBe" + tfName + timeSuffix,
                chartTime[cb], chartHigh[cb],
-               "M", C'220,90,130', true);
+               "M", C'255,100,255', true);
       }
       else if(!fullRecalc && j >= cnt - 3)
       {
@@ -520,19 +535,19 @@ void ProcessHTF(int tfIdx, int lb,
          if(bBu)
             CreateBOSLabel("BBu" + tfName + timeSuffix,
                chartTime[cb], chartLow[cb],
-               "B", C'0,220,120', false);
+               "B", C'255,215,0', false);
          if(bBe)
             CreateBOSLabel("BBe" + tfName + timeSuffix,
                chartTime[cb], chartHigh[cb],
-               "B", C'230,85,85', true);
+               "B", C'255,165,0', true);
          if(mBu)
             CreateBOSLabel("MBu" + tfName + timeSuffix,
                chartTime[cb], chartLow[cb],
-               "M", C'0,185,150', false);
+               "M", C'0,255,255', false);
          if(mBe)
             CreateBOSLabel("MBe" + tfName + timeSuffix,
                chartTime[cb], chartHigh[cb],
-               "M", C'220,90,130', true);
+               "M", C'255,100,255', true);
       }
    }
 
@@ -668,6 +683,8 @@ int OnCalculate(const int rates_total,
          if(nT == 1 && prevMaster != 1)
          {
             g_bullSignal[i] = low[i];
+            CreateSignalLabel("SigBull" + IntegerToString(i),
+               time[i], low[i], "BULL", C'0,220,120', false);
             if(i == rates_total - 1 && prev_calculated > 0 && time[i] > g_lastNotifyTime)
             {
                g_lastNotifyTime = time[i];
@@ -677,6 +694,8 @@ int OnCalculate(const int rates_total,
          if(nT == -1 && prevMaster != -1)
          {
             g_bearSignal[i] = high[i];
+            CreateSignalLabel("SigBear" + IntegerToString(i),
+               time[i], high[i], "BEAR", C'255,70,70', true);
             if(i == rates_total - 1 && prev_calculated > 0 && time[i] > g_lastNotifyTime)
             {
                g_lastNotifyTime = time[i];
