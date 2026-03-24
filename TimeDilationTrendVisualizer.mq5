@@ -6,7 +6,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Time Dilation Trend Visualizer [EZPZ]"
 #property link      ""
-#property version   "3.00"
+#property version   "3.10"
 #property indicator_chart_window
 
 #property indicator_buffers 21
@@ -14,61 +14,61 @@
 
 #property indicator_label1  "Ribbon1_2"
 #property indicator_type1   DRAW_FILLING
-#property indicator_color1  C'100,220,180',C'255,140,140'
+#property indicator_color1  C'70,180,160',C'200,110,110'
 #property indicator_style1  STYLE_SOLID
 #property indicator_width1  1
 
 #property indicator_label2  "Ribbon2_3"
 #property indicator_type2   DRAW_FILLING
-#property indicator_color2  C'90,210,170',C'250,125,125'
+#property indicator_color2  C'60,165,148',C'190,100,100'
 #property indicator_style2  STYLE_SOLID
 #property indicator_width2  1
 
 #property indicator_label3  "Ribbon3_4"
 #property indicator_type3   DRAW_FILLING
-#property indicator_color3  C'80,200,160',C'240,110,110'
+#property indicator_color3  C'52,150,136',C'178,90,90'
 #property indicator_style3  STYLE_SOLID
 #property indicator_width3  1
 
 #property indicator_label4  "Ribbon4_5"
 #property indicator_type4   DRAW_FILLING
-#property indicator_color4  C'70,190,150',C'230,95,95'
+#property indicator_color4  C'44,135,124',C'166,80,80'
 #property indicator_style4  STYLE_SOLID
 #property indicator_width4  1
 
 #property indicator_label5  "Ribbon5_6"
 #property indicator_type5   DRAW_FILLING
-#property indicator_color5  C'60,180,140',C'220,80,80'
+#property indicator_color5  C'38,120,112',C'154,72,72'
 #property indicator_style5  STYLE_SOLID
 #property indicator_width5  1
 
 #property indicator_label6  "Ribbon6_7"
 #property indicator_type6   DRAW_FILLING
-#property indicator_color6  C'50,170,130',C'210,70,70'
+#property indicator_color6  C'32,105,100',C'142,64,64'
 #property indicator_style6  STYLE_SOLID
 #property indicator_width6  1
 
 #property indicator_label7  "Ribbon7_8"
 #property indicator_type7   DRAW_FILLING
-#property indicator_color7  C'40,160,120',C'200,60,60'
+#property indicator_color7  C'26,90,88',C'130,56,56'
 #property indicator_style7  STYLE_SOLID
 #property indicator_width7  1
 
 #property indicator_label8  "BULL"
 #property indicator_type8   DRAW_ARROW
-#property indicator_color8  C'0,230,118'
+#property indicator_color8  C'0,220,120'
 #property indicator_style8  STYLE_SOLID
-#property indicator_width8  3
+#property indicator_width8  5
 
 #property indicator_label9  "BEAR"
 #property indicator_type9   DRAW_ARROW
-#property indicator_color9  C'255,23,68'
+#property indicator_color9  C'255,70,70'
 #property indicator_style9  STYLE_SOLID
-#property indicator_width9  3
+#property indicator_width9  5
 
 #property indicator_label10 "ColorCandle"
 #property indicator_type10  DRAW_COLOR_CANDLES
-#property indicator_color10 C'0,230,118',C'255,82,82',C'96,96,96'
+#property indicator_color10 C'50,205,130',C'230,85,85',C'110,110,125'
 #property indicator_style10 STYLE_SOLID
 #property indicator_width10 1
 
@@ -231,10 +231,10 @@ void MakeButtonCorner(string name, string text, int x, int y, int w, int h,
    ObjectSetInteger(0, name, OBJPROP_YSIZE, h);
    ObjectSetString(0, name, OBJPROP_TEXT, text);
    ObjectSetString(0, name, OBJPROP_FONT, "Arial Bold");
-   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, 9);
-   ObjectSetInteger(0, name, OBJPROP_COLOR, C'190,200,220');
-   ObjectSetInteger(0, name, OBJPROP_BGCOLOR, C'25,27,40');
-   ObjectSetInteger(0, name, OBJPROP_BORDER_COLOR, C'50,70,120');
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, 10);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, C'180,190,210');
+   ObjectSetInteger(0, name, OBJPROP_BGCOLOR, C'30,32,48');
+   ObjectSetInteger(0, name, OBJPROP_BORDER_COLOR, C'60,80,130');
    ObjectSetInteger(0, name, OBJPROP_BACK, false);
    ObjectSetInteger(0, name, OBJPROP_STATE, false);
    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
@@ -243,7 +243,7 @@ void MakeButtonCorner(string name, string text, int x, int y, int w, int h,
 //+------------------------------------------------------------------+
 void CreateUI()
 {
-   int x = 10, y = 20, w = 40, h = 22, gap = 2;
+   int x = 10, y = 20, w = 42, h = 24, gap = 2;
    MakeButtonCorner(g_prefix+"BtnM1",  "M1",  x,             y, w, h, CORNER_LEFT_UPPER);
    MakeButtonCorner(g_prefix+"BtnM5",  "M5",  x+(w+gap),     y, w, h, CORNER_LEFT_UPPER);
    MakeButtonCorner(g_prefix+"BtnM15", "M15", x+2*(w+gap),   y, w, h, CORNER_LEFT_UPPER);
@@ -269,7 +269,7 @@ void CreateWatermark()
    ObjectSetString(0, nm, OBJPROP_TEXT, _Symbol + " " + tf + " | TDTV [FAD]");
    ObjectSetString(0, nm, OBJPROP_FONT, "Arial Bold");
    ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, 22);
-   ObjectSetInteger(0, nm, OBJPROP_COLOR, C'60,60,60');
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, C'50,50,60');
    ObjectSetInteger(0, nm, OBJPROP_BACK, true);
    ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
 }
@@ -339,7 +339,7 @@ void MakeKeyLevel(bool isHi, double pr, datetime t1, datetime t2)
    {
       g_hiLvlCnt++;
       nm = g_prefix + "HL" + IntegerToString(g_hiLvlCnt);
-      c = C'0,229,255';
+      c = C'100,180,240';
       int s = ArraySize(g_hiNames);
       ArrayResize(g_hiNames, s + 1);
       g_hiNames[s] = nm;
@@ -355,7 +355,7 @@ void MakeKeyLevel(bool isHi, double pr, datetime t1, datetime t2)
    {
       g_loLvlCnt++;
       nm = g_prefix + "LL" + IntegerToString(g_loLvlCnt);
-      c = C'255,64,129';
+      c = C'220,90,130';
       int s = ArraySize(g_loNames);
       ArrayResize(g_loNames, s + 1);
       g_loNames[s] = nm;
@@ -496,19 +496,19 @@ void ProcessHTF(int tfIdx, int lb,
          if(bBu)
             CreateBOSLabel("BBu" + tfName + timeSuffix,
                chartTime[cb], chartLow[cb],
-               "B", C'0,230,118', false);
+               "B", C'0,220,120', false);
          if(bBe)
             CreateBOSLabel("BBe" + tfName + timeSuffix,
                chartTime[cb], chartHigh[cb],
-               "B", C'255,82,82', true);
+               "B", C'230,85,85', true);
          if(mBu)
             CreateBOSLabel("MBu" + tfName + timeSuffix,
                chartTime[cb], chartLow[cb],
-               "M", C'0,191,165', false);
+               "M", C'0,185,150', false);
          if(mBe)
             CreateBOSLabel("MBe" + tfName + timeSuffix,
                chartTime[cb], chartHigh[cb],
-               "M", C'255,64,129', true);
+               "M", C'220,90,130', true);
       }
       else if(!fullRecalc && j >= cnt - 3)
       {
@@ -520,19 +520,19 @@ void ProcessHTF(int tfIdx, int lb,
          if(bBu)
             CreateBOSLabel("BBu" + tfName + timeSuffix,
                chartTime[cb], chartLow[cb],
-               "B", C'0,230,118', false);
+               "B", C'0,220,120', false);
          if(bBe)
             CreateBOSLabel("BBe" + tfName + timeSuffix,
                chartTime[cb], chartHigh[cb],
-               "B", C'255,82,82', true);
+               "B", C'230,85,85', true);
          if(mBu)
             CreateBOSLabel("MBu" + tfName + timeSuffix,
                chartTime[cb], chartLow[cb],
-               "M", C'0,191,165', false);
+               "M", C'0,185,150', false);
          if(mBe)
             CreateBOSLabel("MBe" + tfName + timeSuffix,
                chartTime[cb], chartHigh[cb],
-               "M", C'255,64,129', true);
+               "M", C'220,90,130', true);
       }
    }
 
@@ -616,6 +616,9 @@ int OnCalculate(const int rates_total,
          g_loLvlCnt = 0;
          ArrayResize(g_hiNames, 0);
          ArrayResize(g_loNames, 0);
+         // Re-create UI after ObjectsDeleteAll
+         CreateUI();
+         CreateWatermark();
       }
 
       // Resize per-bar trend arrays
