@@ -6,7 +6,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Time Dilation Trend Visualizer [EZPZ]"
 #property link      ""
-#property version   "2.00"
+#property version   "3.00"
 #property indicator_chart_window
 
 #property indicator_buffers 21
@@ -14,43 +14,43 @@
 
 #property indicator_label1  "Ribbon1_2"
 #property indicator_type1   DRAW_FILLING
-#property indicator_color1  C'0,255,65',C'255,23,68'
+#property indicator_color1  C'100,220,180',C'255,140,140'
 #property indicator_style1  STYLE_SOLID
 #property indicator_width1  1
 
 #property indicator_label2  "Ribbon2_3"
 #property indicator_type2   DRAW_FILLING
-#property indicator_color2  C'0,229,58',C'255,45,85'
+#property indicator_color2  C'90,210,170',C'250,125,125'
 #property indicator_style2  STYLE_SOLID
 #property indicator_width2  1
 
 #property indicator_label3  "Ribbon3_4"
 #property indicator_type3   DRAW_FILLING
-#property indicator_color3  C'0,204,51',C'229,57,53'
+#property indicator_color3  C'80,200,160',C'240,110,110'
 #property indicator_style3  STYLE_SOLID
 #property indicator_width3  1
 
 #property indicator_label4  "Ribbon4_5"
 #property indicator_type4   DRAW_FILLING
-#property indicator_color4  C'0,179,45',C'211,47,47'
+#property indicator_color4  C'70,190,150',C'230,95,95'
 #property indicator_style4  STYLE_SOLID
 #property indicator_width4  1
 
 #property indicator_label5  "Ribbon5_6"
 #property indicator_type5   DRAW_FILLING
-#property indicator_color5  C'0,153,38',C'198,40,40'
+#property indicator_color5  C'60,180,140',C'220,80,80'
 #property indicator_style5  STYLE_SOLID
 #property indicator_width5  1
 
 #property indicator_label6  "Ribbon6_7"
 #property indicator_type6   DRAW_FILLING
-#property indicator_color6  C'0,128,32',C'183,28,28'
+#property indicator_color6  C'50,170,130',C'210,70,70'
 #property indicator_style6  STYLE_SOLID
 #property indicator_width6  1
 
 #property indicator_label7  "Ribbon7_8"
 #property indicator_type7   DRAW_FILLING
-#property indicator_color7  C'0,102,26',C'155,27,27'
+#property indicator_color7  C'40,160,120',C'200,60,60'
 #property indicator_style7  STYLE_SOLID
 #property indicator_width7  1
 
@@ -58,13 +58,13 @@
 #property indicator_type8   DRAW_ARROW
 #property indicator_color8  C'0,230,118'
 #property indicator_style8  STYLE_SOLID
-#property indicator_width8  4
+#property indicator_width8  3
 
 #property indicator_label9  "BEAR"
 #property indicator_type9   DRAW_ARROW
 #property indicator_color9  C'255,23,68'
 #property indicator_style9  STYLE_SOLID
-#property indicator_width9  4
+#property indicator_width9  3
 
 #property indicator_label10 "ColorCandle"
 #property indicator_type10  DRAW_COLOR_CANDLES
@@ -89,6 +89,8 @@ input int    InpTrendConfirm = 2;
 input bool   InpShowLevels   = true;
 input int    InpMaxLevels    = 3;
 input int    InpLevelExtend  = 50;
+input bool   InpPushNotify   = false;
+input bool   InpAlertSound   = true;
 
 //--- Ribbon buffers (7 fills x 2 = 14)
 double g_ema1[];
@@ -142,6 +144,9 @@ int    g_hiLvlCnt;
 int    g_loLvlCnt;
 string g_hiNames[];
 string g_loNames[];
+
+//--- Push notification duplicate prevention
+datetime g_lastNotifyTime = 0;
 
 //+------------------------------------------------------------------+
 int OnInit()
@@ -197,7 +202,10 @@ int OnInit()
    ArrayResize(g_hiNames, 0);
    ArrayResize(g_loNames, 0);
 
-   IndicatorSetString(INDICATOR_SHORTNAME, "TDTV [EZPZ]");
+   CreateUI();
+   CreateWatermark();
+
+   IndicatorSetString(INDICATOR_SHORTNAME, "TDTV [FAD]");
    return(INIT_SUCCEEDED);
 }
 
@@ -209,6 +217,78 @@ void OnDeinit(const int reason)
       if(g_hEMA[i] != INVALID_HANDLE)
          IndicatorRelease(g_hEMA[i]);
    ChartRedraw();
+}
+
+//+------------------------------------------------------------------+
+void MakeButtonCorner(string name, string text, int x, int y, int w, int h,
+                      ENUM_BASE_CORNER corner)
+{
+   ObjectCreate(0, name, OBJ_BUTTON, 0, 0, 0);
+   ObjectSetInteger(0, name, OBJPROP_CORNER, corner);
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
+   ObjectSetInteger(0, name, OBJPROP_XSIZE, w);
+   ObjectSetInteger(0, name, OBJPROP_YSIZE, h);
+   ObjectSetString(0, name, OBJPROP_TEXT, text);
+   ObjectSetString(0, name, OBJPROP_FONT, "Arial Bold");
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, 9);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, C'190,200,220');
+   ObjectSetInteger(0, name, OBJPROP_BGCOLOR, C'25,27,40');
+   ObjectSetInteger(0, name, OBJPROP_BORDER_COLOR, C'50,70,120');
+   ObjectSetInteger(0, name, OBJPROP_BACK, false);
+   ObjectSetInteger(0, name, OBJPROP_STATE, false);
+   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+}
+
+//+------------------------------------------------------------------+
+void CreateUI()
+{
+   int x = 10, y = 20, w = 40, h = 22, gap = 2;
+   MakeButtonCorner(g_prefix+"BtnM1",  "M1",  x,             y, w, h, CORNER_LEFT_UPPER);
+   MakeButtonCorner(g_prefix+"BtnM5",  "M5",  x+(w+gap),     y, w, h, CORNER_LEFT_UPPER);
+   MakeButtonCorner(g_prefix+"BtnM15", "M15", x+2*(w+gap),   y, w, h, CORNER_LEFT_UPPER);
+   MakeButtonCorner(g_prefix+"BtnH1",  "H1",  x+3*(w+gap),   y, w, h, CORNER_LEFT_UPPER);
+   MakeButtonCorner(g_prefix+"BtnH4",  "H4",  x+4*(w+gap),   y, w, h, CORNER_LEFT_UPPER);
+   MakeButtonCorner(g_prefix+"BtnD1",  "D1",  x+5*(w+gap),   y, w, h, CORNER_LEFT_UPPER);
+}
+
+//+------------------------------------------------------------------+
+void CreateWatermark()
+{
+   string nm = g_prefix + "Watermark";
+   if(ObjectFind(0, nm) >= 0) ObjectDelete(0, nm);
+   ObjectCreate(0, nm, OBJ_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, nm, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_CENTER);
+   int chartW = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
+   int chartH = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
+   ObjectSetInteger(0, nm, OBJPROP_XDISTANCE, chartW / 2);
+   ObjectSetInteger(0, nm, OBJPROP_YDISTANCE, chartH / 2);
+   string tf = EnumToString(Period());
+   StringReplace(tf, "PERIOD_", "");
+   ObjectSetString(0, nm, OBJPROP_TEXT, _Symbol + " " + tf + " | TDTV [FAD]");
+   ObjectSetString(0, nm, OBJPROP_FONT, "Arial Bold");
+   ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, 22);
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, C'60,60,60');
+   ObjectSetInteger(0, nm, OBJPROP_BACK, true);
+   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+}
+
+//+------------------------------------------------------------------+
+void SendSignalAlert(string direction, double price)
+{
+   string tf = EnumToString(Period());
+   StringReplace(tf, "PERIOD_", "");
+   string msg = StringFormat("[%s] %s @ %s | %s | %s",
+                _Symbol, direction,
+                DoubleToString(price, _Digits),
+                tf, TimeToString(TimeCurrent(), TIME_DATE|TIME_MINUTES));
+   if(InpAlertSound)
+      PlaySound("alert.wav");
+   Alert(msg);
+   if(InpPushNotify)
+      SendNotification(msg);
+   Print("TDTV Alert: ", msg);
 }
 
 //+------------------------------------------------------------------+
@@ -244,24 +324,10 @@ void CreateBOSLabel(string tag, datetime dt, double pr,
    ObjectCreate(0, nm, OBJ_TEXT, 0, dt, pr);
    ObjectSetString(0, nm, OBJPROP_TEXT, txt);
    ObjectSetInteger(0, nm, OBJPROP_COLOR, c);
-   ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, 9);
+   ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, 7);
    ObjectSetString(0, nm, OBJPROP_FONT, "Arial Bold");
    ObjectSetInteger(0, nm, OBJPROP_ANCHOR,
                     above ? ANCHOR_LOWER : ANCHOR_UPPER);
-}
-
-//+------------------------------------------------------------------+
-void CreateSignalLabel(string tag, datetime dt, double pr,
-                       string txt, color c)
-{
-   string nm = g_prefix + tag;
-   if(ObjectFind(0, nm) >= 0) return;
-   ObjectCreate(0, nm, OBJ_TEXT, 0, dt, pr);
-   ObjectSetString(0, nm, OBJPROP_TEXT, txt);
-   ObjectSetInteger(0, nm, OBJPROP_COLOR, c);
-   ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, 14);
-   ObjectSetString(0, nm, OBJPROP_FONT, "Arial Bold");
-   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_CENTER);
 }
 
 //+------------------------------------------------------------------+
@@ -430,19 +496,19 @@ void ProcessHTF(int tfIdx, int lb,
          if(bBu)
             CreateBOSLabel("BBu" + tfName + timeSuffix,
                chartTime[cb], chartLow[cb],
-               "BOS\n" + tfName, C'0,230,118', false);
+               "B", C'0,230,118', false);
          if(bBe)
             CreateBOSLabel("BBe" + tfName + timeSuffix,
                chartTime[cb], chartHigh[cb],
-               "BOS\n" + tfName, C'255,82,82', true);
+               "B", C'255,82,82', true);
          if(mBu)
             CreateBOSLabel("MBu" + tfName + timeSuffix,
                chartTime[cb], chartLow[cb],
-               "MSS\n" + tfName, C'0,191,165', false);
+               "M", C'0,191,165', false);
          if(mBe)
             CreateBOSLabel("MBe" + tfName + timeSuffix,
                chartTime[cb], chartHigh[cb],
-               "MSS\n" + tfName, C'255,64,129', true);
+               "M", C'255,64,129', true);
       }
       else if(!fullRecalc && j >= cnt - 3)
       {
@@ -454,19 +520,19 @@ void ProcessHTF(int tfIdx, int lb,
          if(bBu)
             CreateBOSLabel("BBu" + tfName + timeSuffix,
                chartTime[cb], chartLow[cb],
-               "BOS\n" + tfName, C'0,230,118', false);
+               "B", C'0,230,118', false);
          if(bBe)
             CreateBOSLabel("BBe" + tfName + timeSuffix,
                chartTime[cb], chartHigh[cb],
-               "BOS\n" + tfName, C'255,82,82', true);
+               "B", C'255,82,82', true);
          if(mBu)
             CreateBOSLabel("MBu" + tfName + timeSuffix,
                chartTime[cb], chartLow[cb],
-               "MSS\n" + tfName, C'0,191,165', false);
+               "M", C'0,191,165', false);
          if(mBe)
             CreateBOSLabel("MBe" + tfName + timeSuffix,
                chartTime[cb], chartHigh[cb],
-               "MSS\n" + tfName, C'255,64,129', true);
+               "M", C'255,64,129', true);
       }
    }
 
@@ -599,16 +665,20 @@ int OnCalculate(const int rates_total,
          if(nT == 1 && prevMaster != 1)
          {
             g_bullSignal[i] = low[i];
-            CreateSignalLabel("BULL" + IntegerToString(i),
-               time[i], low[i] - (high[i] - low[i]) * 1.5,
-               "BULL", C'0,230,118');
+            if(i == rates_total - 1 && prev_calculated > 0 && time[i] > g_lastNotifyTime)
+            {
+               g_lastNotifyTime = time[i];
+               SendSignalAlert("BULL", close[i]);
+            }
          }
          if(nT == -1 && prevMaster != -1)
          {
             g_bearSignal[i] = high[i];
-            CreateSignalLabel("BEAR" + IntegerToString(i),
-               time[i], high[i] + (high[i] - low[i]) * 1.5,
-               "BEAR", C'255,23,68');
+            if(i == rates_total - 1 && prev_calculated > 0 && time[i] > g_lastNotifyTime)
+            {
+               g_lastNotifyTime = time[i];
+               SendSignalAlert("BEAR", close[i]);
+            }
          }
 
          prevMaster = nT;
@@ -651,5 +721,31 @@ int OnCalculate(const int rates_total,
    }
 
    return(rates_total);
+}
+
+//+------------------------------------------------------------------+
+void OnChartEvent(const int id, const long &lparam,
+                  const double &dparam, const string &sparam)
+{
+   if(id == CHARTEVENT_CHART_CHANGE)
+   {
+      CreateWatermark();
+      return;
+   }
+
+   if(id != CHARTEVENT_OBJECT_CLICK) return;
+
+   if(sparam == g_prefix+"BtnM1")
+   { ChartSetSymbolPeriod(0, _Symbol, PERIOD_M1);  ObjectSetInteger(0, sparam, OBJPROP_STATE, false); }
+   else if(sparam == g_prefix+"BtnM5")
+   { ChartSetSymbolPeriod(0, _Symbol, PERIOD_M5);  ObjectSetInteger(0, sparam, OBJPROP_STATE, false); }
+   else if(sparam == g_prefix+"BtnM15")
+   { ChartSetSymbolPeriod(0, _Symbol, PERIOD_M15); ObjectSetInteger(0, sparam, OBJPROP_STATE, false); }
+   else if(sparam == g_prefix+"BtnH1")
+   { ChartSetSymbolPeriod(0, _Symbol, PERIOD_H1);  ObjectSetInteger(0, sparam, OBJPROP_STATE, false); }
+   else if(sparam == g_prefix+"BtnH4")
+   { ChartSetSymbolPeriod(0, _Symbol, PERIOD_H4);  ObjectSetInteger(0, sparam, OBJPROP_STATE, false); }
+   else if(sparam == g_prefix+"BtnD1")
+   { ChartSetSymbolPeriod(0, _Symbol, PERIOD_D1);  ObjectSetInteger(0, sparam, OBJPROP_STATE, false); }
 }
 //+------------------------------------------------------------------+
