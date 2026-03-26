@@ -6,7 +6,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Time Dilation Trend Visualizer [EZPZ]"
 #property link      ""
-#property version   "3.20"
+#property version   "3.30"
 #property indicator_chart_window
 
 #property indicator_buffers 21
@@ -411,8 +411,8 @@ int FindChartBar(const datetime &time[], int total, datetime target)
 }
 
 //+------------------------------------------------------------------+
-// Process one HTF timeframe: detect BOS/MSS, store trend per HTF bar
-// Returns trend array mapped to chart bars
+// Process one HTF timeframe: detect BOS/MSS at CHART BAR frequency
+// Simulates Pine Script's request.security + f_structure_logic behavior
 //+------------------------------------------------------------------+
 void ProcessHTF(int tfIdx, int lb,
                 const datetime &chartTime[], const double &chartHigh[],
@@ -437,30 +437,59 @@ void ProcessHTF(int tfIdx, int lb,
 
    if(cnt < 2 * lb + 2) return;
 
-   // Arrays for HTF bar trend
-   double htfTrend[];
-   ArrayResize(htfTrend, cnt);
-   ArrayInitialize(htfTrend, 0.0);
-
-   // Structure state
-   double prevSH = 0, prevSL = 0, lastSH = 0, lastSL = 0;
-   double lastSH_prev = 0, lastSL_prev = 0;
-   int trend = 0;
-
-   // Process all HTF bars chronologically
+   // Pre-compute pivots at HTF bar level
+   double htfPH[], htfPL[];
+   ArrayResize(htfPH, cnt);
+   ArrayResize(htfPL, cnt);
    for(int j = 0; j < cnt; j++)
    {
-      // Check for confirmed pivot (pivot at j-lb, confirmed at j)
-      double ph = 0, pl = 0;
       if(j >= 2 * lb)
       {
-         ph = FindPivotHigh(htfH, j - lb, lb, lb, cnt);
-         pl = FindPivotLow(htfL, j - lb, lb, lb, cnt);
+         htfPH[j] = FindPivotHigh(htfH, j - lb, lb, lb, cnt);
+         htfPL[j] = FindPivotLow(htfL, j - lb, lb, lb, cnt);
       }
+      else
+      {
+         htfPH[j] = 0.0;
+         htfPL[j] = 0.0;
+      }
+   }
 
-      // Update swing levels
-      if(ph > 0) { prevSH = lastSH; lastSH = ph; }
-      if(pl > 0) { prevSL = lastSL; lastSL = pl; }
+   // Structure state (Pine's var equivalents, persist across chart bars)
+   double prevSH = 0, prevSL = 0, lastSH = 0, lastSL = 0;
+   int trend = 0;
+
+   // Previous chart bar's values for crossover detection
+   double prevMappedClose = 0;
+   double prevLastSH = 0;
+   double prevLastSL = 0;
+   int prevMappedIdx = -1;
+
+   // Period in seconds for request.security mapping
+   int chartPeriod = PeriodSeconds(PERIOD_CURRENT);
+   int htfPeriod = PeriodSeconds(period);
+
+   string tfName = g_mtfName[tfIdx];
+
+   // Process at CHART BAR frequency (matches Pine's f_structure_logic)
+   for(int i = 0; i < chartTotal; i++)
+   {
+      // Simulate request.security(lookahead=off):
+      // Find latest HTF bar that CLOSED by chart bar's close time
+      datetime chartClose = chartTime[i] + (datetime)chartPeriod;
+      datetime cutoff = chartClose - (datetime)htfPeriod;
+      int htfIdx = FindChartBar(htfT, cnt, cutoff);
+
+      // Update swing levels for all new HTF bars since last chart bar
+      if(htfIdx > prevMappedIdx)
+      {
+         int startK = (prevMappedIdx >= 0) ? prevMappedIdx + 1 : 0;
+         for(int k = startK; k <= htfIdx; k++)
+         {
+            if(htfPH[k] > 0.0) { prevSH = lastSH; lastSH = htfPH[k]; }
+            if(htfPL[k] > 0.0) { prevSL = lastSL; lastSL = htfPL[k]; }
+         }
+      }
 
       // Determine trend
       if(lastSH > 0 && prevSH > 0 && lastSL > 0 && prevSL > 0)
@@ -469,95 +498,62 @@ void ProcessHTF(int tfIdx, int lb,
          else if(lastSH < prevSH && lastSL < prevSL) trend = -1;
       }
 
-      // Crossover detection (ta.crossover / ta.crossunder equivalent)
+      // Crossover at CHART BAR frequency (ta.crossover/ta.crossunder)
+      double curClose = htfC[htfIdx];
       bool bBu = false, bBe = false, mBu = false, mBe = false;
 
-      if(j > 0)
+      if(i > 0 && prevMappedClose > 0)
       {
-         double cls = htfC[j];
-         double prevCls = htfC[j - 1];
+         bool crossOverSH = (lastSH > 0 && prevLastSH > 0
+                             && curClose > lastSH && prevMappedClose <= prevLastSH);
+         bool crossUnderSL = (lastSL > 0 && prevLastSL > 0
+                              && curClose < lastSL && prevMappedClose >= prevLastSL);
 
-         // crossover(close, lastSH): close > lastSH AND prevClose <= lastSH_prev
-         bool crossOverSH = (lastSH > 0 && lastSH_prev > 0
-                             && cls > lastSH && prevCls <= lastSH_prev);
-         // crossunder(close, lastSL): close < lastSL AND prevClose >= lastSL_prev
-         bool crossUnderSL = (lastSL > 0 && lastSL_prev > 0
-                              && cls < lastSL && prevCls >= lastSL_prev);
-
-         if(trend == 1 && crossOverSH)  bBu = true;
-         if(trend == -1 && crossUnderSL) bBe = true;
-         if(trend == -1 && crossOverSH) mBu = true;
-         if(trend == 1 && crossUnderSL) mBe = true;
+         if(trend == 1 && crossOverSH)   bBu = true;
+         if(trend == -1 && crossUnderSL)  bBe = true;
+         if(trend == -1 && crossOverSH)   mBu = true;
+         if(trend == 1 && crossUnderSL)   mBe = true;
       }
 
       // Update trend on MSS
       if(mBu) trend = 1;
       if(mBe) trend = -1;
 
-      htfTrend[j] = (double)trend;
+      barTrend[i] = (double)trend;
 
-      // Store for next iteration's crossover check
-      lastSH_prev = lastSH;
-      lastSL_prev = lastSL;
+      // Store for next chart bar's crossover
+      prevMappedClose = curClose;
+      prevLastSH = lastSH;
+      prevLastSL = lastSL;
+      prevMappedIdx = htfIdx;
 
-      // Create BOS/MSS labels (limit to recent bars)
-      if(fullRecalc && j > cnt - 500)
+      // Create BOS/MSS labels
+      if(bBu || bBe || mBu || mBe)
       {
-         // Find chart bar for this HTF bar time
-         int cb = FindChartBar(chartTime, chartTotal, htfT[j]);
-         string timeSuffix = IntegerToString((long)htfT[j]);
-         string tfName = g_mtfName[tfIdx];
+         bool isRecent = (fullRecalc && i > chartTotal - 500) ||
+                         (!fullRecalc && i >= chartTotal - 3);
+         if(isRecent)
+         {
+            string timeSuffix = IntegerToString((long)chartTime[i]);
 
-         if(bBu)
-            CreateBOSLabel("BBu" + tfName + timeSuffix,
-               chartTime[cb], chartLow[cb],
-               "B", C'255,215,0', false);
-         if(bBe)
-            CreateBOSLabel("BBe" + tfName + timeSuffix,
-               chartTime[cb], chartHigh[cb],
-               "B", C'255,165,0', true);
-         if(mBu)
-            CreateBOSLabel("MBu" + tfName + timeSuffix,
-               chartTime[cb], chartLow[cb],
-               "M", C'0,255,255', false);
-         if(mBe)
-            CreateBOSLabel("MBe" + tfName + timeSuffix,
-               chartTime[cb], chartHigh[cb],
-               "M", C'255,100,255', true);
+            if(bBu)
+               CreateBOSLabel("BBu" + tfName + timeSuffix,
+                  chartTime[i], chartLow[i],
+                  "B", C'0,230,118', false);
+            if(bBe)
+               CreateBOSLabel("BBe" + tfName + timeSuffix,
+                  chartTime[i], chartHigh[i],
+                  "B", C'255,82,82', true);
+            if(mBu)
+               CreateBOSLabel("MBu" + tfName + timeSuffix,
+                  chartTime[i], chartLow[i],
+                  "M", C'0,190,160', false);
+            if(mBe)
+               CreateBOSLabel("MBe" + tfName + timeSuffix,
+                  chartTime[i], chartHigh[i],
+                  "M", C'255,80,150', true);
+         }
       }
-      else if(!fullRecalc && j >= cnt - 3)
-      {
-         // Incremental: only check latest HTF bars
-         int cb = FindChartBar(chartTime, chartTotal, htfT[j]);
-         string timeSuffix = IntegerToString((long)htfT[j]);
-         string tfName = g_mtfName[tfIdx];
-
-         if(bBu)
-            CreateBOSLabel("BBu" + tfName + timeSuffix,
-               chartTime[cb], chartLow[cb],
-               "B", C'255,215,0', false);
-         if(bBe)
-            CreateBOSLabel("BBe" + tfName + timeSuffix,
-               chartTime[cb], chartHigh[cb],
-               "B", C'255,165,0', true);
-         if(mBu)
-            CreateBOSLabel("MBu" + tfName + timeSuffix,
-               chartTime[cb], chartLow[cb],
-               "M", C'0,255,255', false);
-         if(mBe)
-            CreateBOSLabel("MBe" + tfName + timeSuffix,
-               chartTime[cb], chartHigh[cb],
-               "M", C'255,100,255', true);
-      }
-   }
-
-   // Map HTF trend to chart bars using pointer advancement
-   int htfPtr = 0;
-   for(int i = 0; i < chartTotal; i++)
-   {
-      while(htfPtr + 1 < cnt && htfT[htfPtr + 1] <= chartTime[i])
-         htfPtr++;
-      barTrend[i] = htfTrend[htfPtr];
    }
 }
 
