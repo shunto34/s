@@ -6,7 +6,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Time Dilation Trend Visualizer [EZPZ]"
 #property link      ""
-#property version   "3.40"
+#property version   "3.50"
 #property indicator_chart_window
 
 #property indicator_buffers 21
@@ -478,14 +478,14 @@ void CreateBOSLabel(string tag, datetime dt, double pr,
 
 //+------------------------------------------------------------------+
 void CreateSignalLabel(string tag, datetime dt, double pr,
-                       string txt, color c, bool above)
+                       string txt, color c, bool above, int fontSize = 10)
 {
    string nm = g_prefix + tag;
    if(ObjectFind(0, nm) >= 0) return;
    ObjectCreate(0, nm, OBJ_TEXT, 0, dt, pr);
    ObjectSetString(0, nm, OBJPROP_TEXT, txt);
    ObjectSetInteger(0, nm, OBJPROP_COLOR, c);
-   ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, 10);
+   ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, fontSize);
    ObjectSetString(0, nm, OBJPROP_FONT, "Arial Bold");
    ObjectSetInteger(0, nm, OBJPROP_ANCHOR,
                     above ? ANCHOR_LOWER : ANCHOR_UPPER);
@@ -800,7 +800,7 @@ int OnCalculate(const int rates_total,
          ProcessHTF(2, lb, time, high, low, rates_total,
                     fullRecalc, g_barTrend2);
 
-      //=== Phase 3: BULL/BEAR signals (historical) ===
+      //=== Phase 3: BULL/BEAR signals with S/A/B ranking ===
       int prevMaster = 0;
       int startSig = InpEMA8 + 10;
 
@@ -823,26 +823,78 @@ int OnCalculate(const int rates_total,
          else if(aBear) nT = -1;
          else nT = prevMaster;
 
-         if(nT == 1 && prevMaster != 1)
+         // --- Signal scoring (S/A/B rank) ---
+         if((nT == 1 && prevMaster != 1) || (nT == -1 && prevMaster != -1))
          {
-            g_bullSignal[i] = low[i];
-            CreateSignalLabel("SigBull" + IntegerToString(i),
-               time[i], low[i], "BULL", C'0,220,120', false);
-            if(i == rates_total - 1 && prev_calculated > 0 && time[i] > g_lastNotifyTime)
+            int score = 0;
+            bool isBull = (nT == 1);
+
+            // Factor 1: All 3 TFs aligned
+            if(isBull && buCnt == 3) score++;
+            if(!isBull && beCnt == 3) score++;
+
+            // Factor 2: Perfect EMA order
+            bool perfOrder;
+            if(isBull)
+               perfOrder = g_ed0[i]>g_ed1[i] && g_ed1[i]>g_ed2[i] && g_ed2[i]>g_ed3[i]
+                        && g_ed3[i]>g_ed4[i] && g_ed4[i]>g_ed5[i] && g_ed5[i]>g_ed6[i]
+                        && g_ed6[i]>g_ed7[i];
+            else
+               perfOrder = g_ed0[i]<g_ed1[i] && g_ed1[i]<g_ed2[i] && g_ed2[i]<g_ed3[i]
+                        && g_ed3[i]<g_ed4[i] && g_ed4[i]<g_ed5[i] && g_ed5[i]<g_ed6[i]
+                        && g_ed6[i]<g_ed7[i];
+            if(perfOrder) score++;
+
+            // Factor 3: Candle momentum (body > 1.3x avg of last 20)
+            double bodySize = MathAbs(close[i] - open[i]);
+            double avgBody = 0;
+            int mLook = MathMin(20, i - startSig);
+            if(mLook > 0)
             {
-               g_lastNotifyTime = time[i];
-               SendSignalAlert("BULL", close[i]);
+               for(int j = i - mLook; j < i; j++)
+                  avgBody += MathAbs(close[j] - open[j]);
+               avgBody /= mLook;
             }
-         }
-         if(nT == -1 && prevMaster != -1)
-         {
-            g_bearSignal[i] = high[i];
-            CreateSignalLabel("SigBear" + IntegerToString(i),
-               time[i], high[i], "BEAR", C'255,70,70', true);
+            if(avgBody > 0 && bodySize > avgBody * 1.3) score++;
+
+            // Factor 4: Ribbon squeeze expansion
+            double curWidth = MathAbs(g_ed0[i] - g_ed7[i]);
+            double minW = curWidth;
+            int sqLook = MathMin(10, i - startSig);
+            for(int j = i - sqLook; j < i; j++)
+               minW = MathMin(minW, MathAbs(g_ed0[j] - g_ed7[j]));
+            if(curWidth > 0 && minW < curWidth * 0.5) score++;
+
+            // Rank: S(3-4), A(2), B(0-1)
+            if(isBull)
+            {
+               g_bullSignal[i] = low[i];
+               if(score >= 3)
+                  CreateSignalLabel("SigBull" + IntegerToString(i),
+                     time[i], low[i], "BULL \x2605", C'0,255,140', false, 12);
+               else if(score == 2)
+                  CreateSignalLabel("SigBull" + IntegerToString(i),
+                     time[i], low[i], "BULL", C'0,220,120', false);
+               // B rank: dot only, no text label
+            }
+            else
+            {
+               g_bearSignal[i] = high[i];
+               if(score >= 3)
+                  CreateSignalLabel("SigBear" + IntegerToString(i),
+                     time[i], high[i], "BEAR \x2605", C'255,50,50', true, 12);
+               else if(score == 2)
+                  CreateSignalLabel("SigBear" + IntegerToString(i),
+                     time[i], high[i], "BEAR", C'255,70,70', true);
+               // B rank: dot only, no text label
+            }
+
+            // Alert on latest bar
             if(i == rates_total - 1 && prev_calculated > 0 && time[i] > g_lastNotifyTime)
             {
                g_lastNotifyTime = time[i];
-               SendSignalAlert("BEAR", close[i]);
+               string rank = (score >= 3) ? "S" : (score == 2) ? "A" : "B";
+               SendSignalAlert(isBull ? "BULL " + rank : "BEAR " + rank, close[i]);
             }
          }
 
