@@ -6,7 +6,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Time Dilation Trend Visualizer [EZPZ]"
 #property link      ""
-#property version   "3.30"
+#property version   "3.40"
 #property indicator_chart_window
 
 #property indicator_buffers 21
@@ -204,6 +204,7 @@ int OnInit()
 
    CreateUI();
    CreateWatermark();
+   CreateMSSPanel();
 
    IndicatorSetString(INDICATOR_SHORTNAME, "[FAD]TimeDilationTrendVisualizer");
    return(INIT_SUCCEEDED);
@@ -272,6 +273,151 @@ void CreateWatermark()
    ObjectSetInteger(0, nm, OBJPROP_COLOR, C'50,50,60');
    ObjectSetInteger(0, nm, OBJPROP_BACK, true);
    ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+}
+
+//+------------------------------------------------------------------+
+void CreateMSSPanel()
+{
+   int px = 10, py = 155, pw = 150, ph = 140;
+
+   // Background box
+   string bg = g_prefix + "MSSBg";
+   if(ObjectFind(0, bg) < 0)
+   {
+      ObjectCreate(0, bg, OBJ_RECTANGLE_LABEL, 0, 0, 0);
+      ObjectSetInteger(0, bg, OBJPROP_CORNER, CORNER_LEFT_LOWER);
+      ObjectSetInteger(0, bg, OBJPROP_XDISTANCE, px);
+      ObjectSetInteger(0, bg, OBJPROP_YDISTANCE, py);
+      ObjectSetInteger(0, bg, OBJPROP_XSIZE, pw);
+      ObjectSetInteger(0, bg, OBJPROP_YSIZE, ph);
+      ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'25,27,42');
+      ObjectSetInteger(0, bg, OBJPROP_BORDER_COLOR, C'55,70,120');
+      ObjectSetInteger(0, bg, OBJPROP_BORDER_TYPE, BORDER_FLAT);
+      ObjectSetInteger(0, bg, OBJPROP_BACK, false);
+      ObjectSetInteger(0, bg, OBJPROP_SELECTABLE, false);
+   }
+
+   // Title
+   string tt = g_prefix + "MSSTitle";
+   if(ObjectFind(0, tt) < 0)
+   {
+      ObjectCreate(0, tt, OBJ_LABEL, 0, 0, 0);
+      ObjectSetInteger(0, tt, OBJPROP_CORNER, CORNER_LEFT_LOWER);
+      ObjectSetInteger(0, tt, OBJPROP_XDISTANCE, px + 18);
+      ObjectSetInteger(0, tt, OBJPROP_YDISTANCE, py - 8);
+      ObjectSetString(0, tt, OBJPROP_TEXT, "MSS ALIGN");
+      ObjectSetString(0, tt, OBJPROP_FONT, "Arial Bold");
+      ObjectSetInteger(0, tt, OBJPROP_FONTSIZE, 11);
+      ObjectSetInteger(0, tt, OBJPROP_COLOR, C'160,170,200');
+      ObjectSetInteger(0, tt, OBJPROP_BACK, false);
+      ObjectSetInteger(0, tt, OBJPROP_SELECTABLE, false);
+   }
+
+   // 3 rows: TF name + arrow
+   string tfLabels[3] = {"M5", "M15", "H1"};
+   int rowY[3] = {py - 42, py - 72, py - 102};
+
+   for(int i = 0; i < 3; i++)
+   {
+      // TF name label
+      string tfLbl = g_prefix + "MSSTF" + IntegerToString(i);
+      if(ObjectFind(0, tfLbl) < 0)
+      {
+         ObjectCreate(0, tfLbl, OBJ_LABEL, 0, 0, 0);
+         ObjectSetInteger(0, tfLbl, OBJPROP_CORNER, CORNER_LEFT_LOWER);
+         ObjectSetInteger(0, tfLbl, OBJPROP_XDISTANCE, px + 15);
+         ObjectSetInteger(0, tfLbl, OBJPROP_YDISTANCE, rowY[i]);
+         ObjectSetString(0, tfLbl, OBJPROP_TEXT, tfLabels[i]);
+         ObjectSetString(0, tfLbl, OBJPROP_FONT, "Arial Bold");
+         ObjectSetInteger(0, tfLbl, OBJPROP_FONTSIZE, 12);
+         ObjectSetInteger(0, tfLbl, OBJPROP_COLOR, C'190,200,220');
+         ObjectSetInteger(0, tfLbl, OBJPROP_BACK, false);
+         ObjectSetInteger(0, tfLbl, OBJPROP_SELECTABLE, false);
+      }
+
+      // Arrow label
+      string arrLbl = g_prefix + "MSSArr" + IntegerToString(i);
+      if(ObjectFind(0, arrLbl) < 0)
+      {
+         ObjectCreate(0, arrLbl, OBJ_LABEL, 0, 0, 0);
+         ObjectSetInteger(0, arrLbl, OBJPROP_CORNER, CORNER_LEFT_LOWER);
+         ObjectSetInteger(0, arrLbl, OBJPROP_XDISTANCE, px + 95);
+         ObjectSetInteger(0, arrLbl, OBJPROP_YDISTANCE, rowY[i]);
+         ObjectSetString(0, arrLbl, OBJPROP_TEXT, "---");
+         ObjectSetString(0, arrLbl, OBJPROP_FONT, "Arial Bold");
+         ObjectSetInteger(0, arrLbl, OBJPROP_FONTSIZE, 14);
+         ObjectSetInteger(0, arrLbl, OBJPROP_COLOR, C'100,100,115');
+         ObjectSetInteger(0, arrLbl, OBJPROP_BACK, false);
+         ObjectSetInteger(0, arrLbl, OBJPROP_SELECTABLE, false);
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+void UpdateMSSPanel(int trend0, int trend1, int trend2)
+{
+   int trends[3];
+   trends[0] = trend0;
+   trends[1] = trend1;
+   trends[2] = trend2;
+
+   for(int i = 0; i < 3; i++)
+   {
+      string arrLbl = g_prefix + "MSSArr" + IntegerToString(i);
+      if(ObjectFind(0, arrLbl) < 0) continue;
+
+      if(trends[i] == 1)
+      {
+         ObjectSetString(0, arrLbl, OBJPROP_TEXT, CharToString(233));
+         ObjectSetString(0, arrLbl, OBJPROP_FONT, "Wingdings");
+         ObjectSetInteger(0, arrLbl, OBJPROP_FONTSIZE, 18);
+         ObjectSetInteger(0, arrLbl, OBJPROP_COLOR, C'0,230,130');
+      }
+      else if(trends[i] == -1)
+      {
+         ObjectSetString(0, arrLbl, OBJPROP_TEXT, CharToString(234));
+         ObjectSetString(0, arrLbl, OBJPROP_FONT, "Wingdings");
+         ObjectSetInteger(0, arrLbl, OBJPROP_FONTSIZE, 18);
+         ObjectSetInteger(0, arrLbl, OBJPROP_COLOR, C'255,65,65');
+      }
+      else
+      {
+         ObjectSetString(0, arrLbl, OBJPROP_TEXT, "---");
+         ObjectSetString(0, arrLbl, OBJPROP_FONT, "Arial Bold");
+         ObjectSetInteger(0, arrLbl, OBJPROP_FONTSIZE, 14);
+         ObjectSetInteger(0, arrLbl, OBJPROP_COLOR, C'100,100,115');
+      }
+   }
+
+   // Highlight box on full alignment
+   string bg = g_prefix + "MSSBg";
+   string tt = g_prefix + "MSSTitle";
+   if(ObjectFind(0, bg) < 0) return;
+
+   bool allBull = (trend0 == 1  && trend1 == 1  && trend2 == 1);
+   bool allBear = (trend0 == -1 && trend1 == -1 && trend2 == -1);
+
+   if(allBull)
+   {
+      ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'15,55,30');
+      ObjectSetInteger(0, bg, OBJPROP_BORDER_COLOR, C'0,200,110');
+      if(ObjectFind(0, tt) >= 0)
+         ObjectSetInteger(0, tt, OBJPROP_COLOR, C'0,240,130');
+   }
+   else if(allBear)
+   {
+      ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'55,15,20');
+      ObjectSetInteger(0, bg, OBJPROP_BORDER_COLOR, C'230,50,50');
+      if(ObjectFind(0, tt) >= 0)
+         ObjectSetInteger(0, tt, OBJPROP_COLOR, C'255,80,80');
+   }
+   else
+   {
+      ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'25,27,42');
+      ObjectSetInteger(0, bg, OBJPROP_BORDER_COLOR, C'55,70,120');
+      if(ObjectFind(0, tt) >= 0)
+         ObjectSetInteger(0, tt, OBJPROP_COLOR, C'160,170,200');
+   }
 }
 
 //+------------------------------------------------------------------+
@@ -630,6 +776,7 @@ int OnCalculate(const int rates_total,
          // Re-create UI after ObjectsDeleteAll
          CreateUI();
          CreateWatermark();
+         CreateMSSPanel();
       }
 
       // Resize per-bar trend arrays
@@ -703,6 +850,15 @@ int OnCalculate(const int rates_total,
       }
       g_masterTrend = prevMaster;
 
+      // Update MSS Alignment Panel
+      if(rates_total > 0)
+      {
+         int lastIdx = rates_total - 1;
+         UpdateMSSPanel((int)g_barTrend0[lastIdx],
+                        (int)g_barTrend1[lastIdx],
+                        (int)g_barTrend2[lastIdx]);
+      }
+
       //=== Phase 4: Key Levels ===
       if(InpShowLevels && fullRecalc)
       {
@@ -748,6 +904,7 @@ void OnChartEvent(const int id, const long &lparam,
    if(id == CHARTEVENT_CHART_CHANGE)
    {
       CreateWatermark();
+      CreateMSSPanel();
       return;
    }
 
