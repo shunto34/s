@@ -6,7 +6,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Time Dilation Trend Visualizer [EZPZ]"
 #property link      ""
-#property version   "4.30"
+#property version   "4.31"
 #property indicator_chart_window
 
 #property indicator_buffers 21
@@ -90,7 +90,7 @@ input int    InpADXThreshold = 18;       // ADX below this = range (suppress sig
 input double InpRibbonATR    = 0.8;      // Ribbon width must be > ATR * this ratio
 input int    InpCooldownBars = 8;        // Minimum bars between opposing signals
 input bool   InpShowExits    = true;     // Show EXIT take-profit signals
-input int    InpExitThreshold = 65;      // EXIT score threshold (0-100)
+input int    InpExitThreshold = 45;      // EXIT score threshold (0-100)
 
 //--- Ribbon buffers (7 fills x 2 = 14)
 double g_ema1[];
@@ -703,10 +703,10 @@ int CalcExitScore(bool isBullPos, int idx, int total,
 
       double atrDev = priceDeviation / atrBuf[idx];  // ATR-normalized
 
-      if(atrDev > 2.0)      score += 30.0;
-      else if(atrDev > 1.5)  score += 22.0;
-      else if(atrDev > 1.0)  score += 15.0;
-      else if(atrDev > 0.7)  score += 8.0;
+      if(atrDev > 1.5)      score += 30.0;
+      else if(atrDev > 1.0)  score += 22.0;
+      else if(atrDev > 0.6)  score += 15.0;
+      else if(atrDev > 0.3)  score += 8.0;
    }
 
    //=== Layer 2: EMA slope reversal detection (25pt) ===
@@ -719,20 +719,20 @@ int CalcExitScore(bool isBullPos, int idx, int total,
       if(isBullPos)
       {
          if(slopeNow <= 0)                                   score += 25.0;
-         else if(slopePrev > 0 && slopeNow < slopePrev * 0.3) score += 18.0;
-         else if(slopePrev > 0 && slopeNow < slopePrev * 0.6) score += 10.0;
+         else if(slopePrev > 0 && slopeNow < slopePrev * 0.5) score += 18.0;
+         else if(slopePrev > 0 && slopeNow < slopePrev * 0.8) score += 10.0;
       }
       else
       {
          if(slopeNow >= 0)                                   score += 25.0;
-         else if(slopePrev < 0 && slopeNow > slopePrev * 0.3) score += 18.0;
-         else if(slopePrev < 0 && slopeNow > slopePrev * 0.6) score += 10.0;
+         else if(slopePrev < 0 && slopeNow > slopePrev * 0.5) score += 18.0;
+         else if(slopePrev < 0 && slopeNow > slopePrev * 0.8) score += 10.0;
       }
 
       // Bonus: EMA5-EMA8 gap shrinking = ribbon tip converging
       double gap01     = MathAbs(g_ed0[idx] - g_ed1[idx]);
       double gap01prev = MathAbs(g_ed0[idx - 3] - g_ed1[idx - 3]);
-      if(gap01prev > 0 && gap01 < gap01prev * 0.4)
+      if(gap01prev > 0 && gap01 < gap01prev * 0.6)
          score += 5.0;
    }
 
@@ -748,9 +748,10 @@ int CalcExitScore(bool isBullPos, int idx, int total,
       bool adx2decline = (idx >= 2 && adxBuf[idx] < adxBuf[idx-1] && adxBuf[idx-1] < adxBuf[idx-2]);
       bool adx1decline = (idx >= 1 && adxBuf[idx] < adxBuf[idx-1]);
 
-      if(adxMax5 > 25.0 && adx2decline)         score += 20.0;
-      else if(adxMax5 > 25.0 && adx1decline)     score += 12.0;
-      else if(adxMax5 > 30.0 && adxNow < adxMax5 * 0.85) score += 8.0;
+      if(adxMax5 > 20.0 && adx2decline)         score += 20.0;
+      else if(adxMax5 > 20.0 && adx1decline)     score += 12.0;
+      else if(adxMax5 > 25.0 && adxNow < adxMax5 * 0.85) score += 8.0;
+      else if(adx2decline)                        score += 6.0;  // Any ADX level declining
    }
 
    //=== Layer 4: Volume climax pattern (15pt) ===
@@ -768,11 +769,11 @@ int CalcExitScore(bool isBullPos, int idx, int total,
          double vol1ago = (double)tickVol[idx - 1];
          double volNow  = (double)tickVol[idx];
 
-         if(vol2ago > avgVol * 2.0 && vol1ago < vol2ago && volNow < vol1ago)
+         if(vol2ago > avgVol * 1.5 && vol1ago < vol2ago && volNow < vol1ago)
             score += 15.0;
-         else if(vol1ago > avgVol * 1.8 && volNow < vol1ago)
+         else if(vol1ago > avgVol * 1.3 && volNow < vol1ago)
             score += 10.0;
-         else if(volNow < avgVol * 0.5 && vol1ago < avgVol * 0.6)
+         else if(volNow < avgVol * 0.7 && vol1ago < avgVol * 0.8)
             score += 5.0;
       }
    }
@@ -1606,7 +1607,7 @@ int OnCalculate(const int rates_total,
             if(exitScore >= InpExitThreshold)
             {
                lastExitBar = i;
-               bool isStrong = (exitScore >= 80);
+               bool isStrong = (exitScore >= 65);
                color exitC = isStrong ? C'255,140,0' : C'255,200,50';
                int eSz = isStrong ? 28 : 22;
                int eTxtSz = isStrong ? 12 : 10;
