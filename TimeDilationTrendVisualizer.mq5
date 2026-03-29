@@ -6,7 +6,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Time Dilation Trend Visualizer [EZPZ]"
 #property link      ""
-#property version   "4.10"
+#property version   "4.11"
 #property indicator_chart_window
 
 #property indicator_buffers 21
@@ -85,7 +85,7 @@ input int    InpSwingLookback = 10;
 input bool   InpShow5min  = true;
 input bool   InpShow15min = true;
 input bool   InpShow1H    = true;
-input int    InpTrendConfirm = 2;
+input int    InpTrendConfirm = 1;
 input bool   InpShowLevels   = true;
 input int    InpMaxLevels    = 3;
 input int    InpLevelExtend  = 50;
@@ -1075,11 +1075,26 @@ void ProcessHTF(int tfIdx, int lb,
          }
       }
 
-      // Determine trend
+      // Determine trend (relaxed: HH OR HL sufficient, with early init)
       if(lastSH > 0 && prevSH > 0 && lastSL > 0 && prevSL > 0)
       {
-         if(lastSH > prevSH && lastSL > prevSL) trend = 1;
-         else if(lastSH < prevSH && lastSL < prevSL) trend = -1;
+         int structScore = 0;
+         if(lastSH > prevSH) structScore++;
+         if(lastSH < prevSH) structScore--;
+         if(lastSL > prevSL) structScore++;
+         if(lastSL < prevSL) structScore--;
+         if(structScore > 0) trend = 1;
+         else if(structScore < 0) trend = -1;
+      }
+      else if(lastSH > 0 && prevSH > 0)
+      {
+         if(lastSH > prevSH) trend = 1;
+         else if(lastSH < prevSH) trend = -1;
+      }
+      else if(lastSL > 0 && prevSL > 0)
+      {
+         if(lastSL > prevSL) trend = 1;
+         else if(lastSL < prevSL) trend = -1;
       }
 
       // Crossover at CHART BAR frequency (ta.crossover/ta.crossunder)
