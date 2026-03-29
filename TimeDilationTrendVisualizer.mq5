@@ -711,7 +711,7 @@ void UpdateMSSPanel(int trend0, int trend1, int trend2,
 //+------------------------------------------------------------------+
 void CreateTrendPanel()
 {
-   int px = 60, py = 190, pw = 175, ph = 160;
+   int px = 160, py = 190, pw = 175, ph = 160;
 
    string bg = g_prefix + "TrendBg";
    if(ObjectFind(0, bg) < 0)
