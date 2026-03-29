@@ -6,7 +6,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Time Dilation Trend Visualizer [EZPZ]"
 #property link      ""
-#property version   "4.20"
+#property version   "4.30"
 #property indicator_chart_window
 
 #property indicator_buffers 21
@@ -89,6 +89,8 @@ input int    InpADXPeriod    = 14;       // ADX period for range filter
 input int    InpADXThreshold = 18;       // ADX below this = range (suppress signal)
 input double InpRibbonATR    = 0.8;      // Ribbon width must be > ATR * this ratio
 input int    InpCooldownBars = 8;        // Minimum bars between opposing signals
+input bool   InpShowExits    = true;     // Show EXIT take-profit signals
+input int    InpExitThreshold = 65;      // EXIT score threshold (0-100)
 
 //--- Ribbon buffers (7 fills x 2 = 14)
 double g_ema1[];
@@ -669,6 +671,142 @@ int CalcMSSScore(int t0, int t1, int t2,
    }
    if(breakScore > breakMax) breakScore = breakMax;
    score += breakScore;
+
+   int finalScore = (int)MathMin(100.0, MathMax(0.0, score));
+   return(finalScore);
+}
+
+//+------------------------------------------------------------------+
+// CalcExitScore: 5-layer momentum exhaustion detection
+// Detects when a trend is about to reverse — fires EXIT take-profit signal
+//+------------------------------------------------------------------+
+int CalcExitScore(bool isBullPos, int idx, int total,
+                  const double &close[], const double &open[],
+                  const double &high[], const double &low[],
+                  const long &tickVol[],
+                  const double &adxBuf[], int adxCnt,
+                  const double &atrBuf[], int atrCnt)
+{
+   double score = 0.0;
+   if(idx < 10) return(0);
+
+   //=== Layer 1: Price deviation from EMA ribbon (30pt) ===
+   // When price stretches too far from fastest EMA → mean reversion imminent
+   double ribbonW = MathAbs(g_ed0[idx] - g_ed7[idx]);
+   if(atrCnt > idx && atrBuf[idx] > 0 && ribbonW > 0)
+   {
+      double priceDeviation;
+      if(isBullPos)
+         priceDeviation = close[idx] - g_ed0[idx];  // How far above EMA5
+      else
+         priceDeviation = g_ed0[idx] - close[idx];  // How far below EMA5
+
+      double atrDev = priceDeviation / atrBuf[idx];  // ATR-normalized
+
+      if(atrDev > 2.0)      score += 30.0;
+      else if(atrDev > 1.5)  score += 22.0;
+      else if(atrDev > 1.0)  score += 15.0;
+      else if(atrDev > 0.7)  score += 8.0;
+   }
+
+   //=== Layer 2: EMA slope reversal detection (25pt) ===
+   // Fastest EMA curling back = trend tip breaking
+   if(idx >= 5)
+   {
+      double slopeNow  = g_ed0[idx] - g_ed0[idx - 2];
+      double slopePrev = g_ed0[idx - 2] - g_ed0[idx - 4];
+
+      if(isBullPos)
+      {
+         if(slopeNow <= 0)                                   score += 25.0;
+         else if(slopePrev > 0 && slopeNow < slopePrev * 0.3) score += 18.0;
+         else if(slopePrev > 0 && slopeNow < slopePrev * 0.6) score += 10.0;
+      }
+      else
+      {
+         if(slopeNow >= 0)                                   score += 25.0;
+         else if(slopePrev < 0 && slopeNow > slopePrev * 0.3) score += 18.0;
+         else if(slopePrev < 0 && slopeNow > slopePrev * 0.6) score += 10.0;
+      }
+
+      // Bonus: EMA5-EMA8 gap shrinking = ribbon tip converging
+      double gap01     = MathAbs(g_ed0[idx] - g_ed1[idx]);
+      double gap01prev = MathAbs(g_ed0[idx - 3] - g_ed1[idx - 3]);
+      if(gap01prev > 0 && gap01 < gap01prev * 0.4)
+         score += 5.0;
+   }
+
+   //=== Layer 3: ADX peak detection (20pt) ===
+   // ADX peaking and declining = trend power past its peak
+   if(adxCnt > idx && idx >= 5)
+   {
+      double adxMax5 = 0;
+      for(int j = idx - 4; j <= idx; j++)
+         if(j >= 0 && j < adxCnt && adxBuf[j] > adxMax5) adxMax5 = adxBuf[j];
+
+      double adxNow = adxBuf[idx];
+      bool adx2decline = (idx >= 2 && adxBuf[idx] < adxBuf[idx-1] && adxBuf[idx-1] < adxBuf[idx-2]);
+      bool adx1decline = (idx >= 1 && adxBuf[idx] < adxBuf[idx-1]);
+
+      if(adxMax5 > 25.0 && adx2decline)         score += 20.0;
+      else if(adxMax5 > 25.0 && adx1decline)     score += 12.0;
+      else if(adxMax5 > 30.0 && adxNow < adxMax5 * 0.85) score += 8.0;
+   }
+
+   //=== Layer 4: Volume climax pattern (15pt) ===
+   // Spike in volume followed by declining volume = distribution complete
+   if(idx >= 22)
+   {
+      double avgVol = 0;
+      for(int j = idx - 20; j < idx; j++)
+         avgVol += (double)tickVol[j];
+      avgVol /= 20.0;
+
+      if(avgVol > 0 && idx >= 2)
+      {
+         double vol2ago = (double)tickVol[idx - 2];
+         double vol1ago = (double)tickVol[idx - 1];
+         double volNow  = (double)tickVol[idx];
+
+         if(vol2ago > avgVol * 2.0 && vol1ago < vol2ago && volNow < vol1ago)
+            score += 15.0;
+         else if(vol1ago > avgVol * 1.8 && volNow < vol1ago)
+            score += 10.0;
+         else if(volNow < avgVol * 0.5 && vol1ago < avgVol * 0.6)
+            score += 5.0;
+      }
+   }
+
+   //=== Layer 5: Candle rejection pattern (10pt) ===
+   // Pin bars, doji, engulfing at trend extremes
+   double range = high[idx] - low[idx];
+   double body  = MathAbs(close[idx] - open[idx]);
+
+   if(range > 0)
+   {
+      if(isBullPos)
+      {
+         double upperWick = high[idx] - MathMax(close[idx], open[idx]);
+         if(upperWick > range * 0.6)       score += 10.0;  // Pin bar (upper wick)
+         else if(body < range * 0.25)      score += 7.0;   // Doji
+      }
+      else
+      {
+         double lowerWick = MathMin(close[idx], open[idx]) - low[idx];
+         if(lowerWick > range * 0.6)       score += 10.0;  // Pin bar (lower wick)
+         else if(body < range * 0.25)      score += 7.0;   // Doji
+      }
+
+      // Engulfing pattern (opposite direction large candle)
+      if(idx > 0)
+      {
+         double prevBody = MathAbs(close[idx-1] - open[idx-1]);
+         if(isBullPos && close[idx] < open[idx] && body > prevBody * 1.2)
+            score += 5.0;  // Bearish engulfing
+         if(!isBullPos && close[idx] > open[idx] && body > prevBody * 1.2)
+            score += 5.0;  // Bullish engulfing
+      }
+   }
 
    int finalScore = (int)MathMin(100.0, MathMax(0.0, score));
    return(finalScore);
@@ -1326,6 +1464,7 @@ int OnCalculate(const int rates_total,
       int prevMaster = 0;
       int startSig = InpEMA8 + 10;
       int lastSignalBar = -9999;  // Anti-whipsaw: track last signal bar
+      int lastExitBar   = -9999;  // EXIT cooldown tracker
 
       // Get ADX + ATR buffers for range filter
       double adxBuf[];
@@ -1445,6 +1584,7 @@ int OnCalculate(const int rates_total,
             }
 
             lastSignalBar = i;  // Update anti-whipsaw tracker
+            lastExitBar = -9999;  // Reset exit tracker on new entry signal
 
             // Alert on latest bar
             if(i == rates_total - 1 && prev_calculated > 0 && time[i] > g_lastNotifyTime)
@@ -1452,6 +1592,42 @@ int OnCalculate(const int rates_total,
                g_lastNotifyTime = time[i];
                string rank = (score >= 3) ? "S" : (score == 2) ? "A" : "B";
                SendSignalAlert(isBull ? "BULL " + rank : "BEAR " + rank, close[i]);
+            }
+         }
+
+         //=== EXIT take-profit signal: momentum exhaustion detection ===
+         if(InpShowExits && prevMaster != 0 && (i - lastSignalBar) > 3
+            && (i - lastExitBar) >= InpCooldownBars)
+         {
+            bool isBullPos = (prevMaster == 1);
+            int exitScore = CalcExitScore(isBullPos, i, rates_total,
+                                          close, open, high, low, tick_volume,
+                                          adxBuf, adxCopied, atrBuf, atrCopied);
+            if(exitScore >= InpExitThreshold)
+            {
+               lastExitBar = i;
+               bool isStrong = (exitScore >= 80);
+               color exitC = isStrong ? C'255,140,0' : C'255,200,50';
+               int eSz = isStrong ? 28 : 22;
+               int eTxtSz = isStrong ? 12 : 10;
+               string eTxt = isStrong ? "EXIT \x2605" : "EXIT";
+
+               if(isBullPos)
+               {
+                  // Exit long: marker above price
+                  CreateSignalDot("DotExit" + IntegerToString(i),
+                     time[i], high[i], exitC, true, eSz);
+                  CreateSignalLabel("SigExit" + IntegerToString(i),
+                     time[i], high[i], eTxt, exitC, true, eTxtSz);
+               }
+               else
+               {
+                  // Exit short: marker below price
+                  CreateSignalDot("DotExit" + IntegerToString(i),
+                     time[i], low[i], exitC, false, eSz);
+                  CreateSignalLabel("SigExit" + IntegerToString(i),
+                     time[i], low[i], eTxt, exitC, false, eTxtSz);
+               }
             }
          }
 
@@ -1463,17 +1639,7 @@ int OnCalculate(const int rates_total,
       }
       g_masterTrend = prevMaster;
 
-      // Update MSS Score Panel + Trend Status Panel
-      if(rates_total > 0)
-      {
-         int lastIdx = rates_total - 1;
-         UpdateMSSPanel((int)g_barTrend0[lastIdx],
-                        (int)g_barTrend1[lastIdx],
-                        (int)g_barTrend2[lastIdx],
-                        close, open, high, low, tick_volume,
-                        lastIdx, rates_total);
-         UpdateTrendPanel();
-      }
+      // Update MSS Score Panel + Trend Status Panel (moved to outside block below)
 
       //=== Phase 4: Key Levels ===
       if(InpShowLevels && fullRecalc)
@@ -1507,11 +1673,21 @@ int OnCalculate(const int rates_total,
          }
       }
 
-      // Enforce panel visibility after all object operations
-      EnforcePanelVisibility();
-
       ChartRedraw();
    }
+
+   // Update MSS Score Panel + Trend Status Panel — EVERY TICK (outside fullRecalc||newBar)
+   if(rates_total > 0)
+   {
+      int lastIdx = rates_total - 1;
+      UpdateMSSPanel((int)g_barTrend0[lastIdx],
+                     (int)g_barTrend1[lastIdx],
+                     (int)g_barTrend2[lastIdx],
+                     close, open, high, low, tick_volume,
+                     lastIdx, rates_total);
+      UpdateTrendPanel();
+   }
+   EnforcePanelVisibility();
 
    return(rates_total);
 }
