@@ -6,7 +6,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Time Dilation Trend Visualizer [EZPZ]"
 #property link      ""
-#property version   "4.11"
+#property version   "4.20"
 #property indicator_chart_window
 
 #property indicator_buffers 21
@@ -85,6 +85,10 @@ input int    InpMaxLevels    = 3;
 input int    InpLevelExtend  = 50;
 input bool   InpPushNotify   = false;
 input bool   InpAlertSound   = true;
+input int    InpADXPeriod    = 14;       // ADX period for range filter
+input int    InpADXThreshold = 18;       // ADX below this = range (suppress signal)
+input double InpRibbonATR    = 0.8;      // Ribbon width must be > ATR * this ratio
+input int    InpCooldownBars = 8;        // Minimum bars between opposing signals
 
 //--- Ribbon buffers (7 fills x 2 = 14)
 double g_ema1[];
@@ -151,6 +155,9 @@ int g_hTrendATR[4];
 
 //--- Chart ATR handle for adaptive scoring
 int g_hChartATR;
+
+//--- ADX handle for range filter
+int g_hADX;
 
 //--- Panel visibility toggle
 bool g_showMSS   = true;
@@ -224,6 +231,8 @@ int OnInit()
    }
    g_hChartATR = iATR(_Symbol, PERIOD_CURRENT, 14);
    if(g_hChartATR == INVALID_HANDLE) return(INIT_FAILED);
+   g_hADX = iADX(_Symbol, PERIOD_CURRENT, InpADXPeriod);
+   if(g_hADX == INVALID_HANDLE) return(INIT_FAILED);
 
    CreateUI();
    CreateWatermark();
@@ -249,6 +258,7 @@ void OnDeinit(const int reason)
       if(g_hTrendATR[i] != INVALID_HANDLE) IndicatorRelease(g_hTrendATR[i]);
    }
    if(g_hChartATR != INVALID_HANDLE) IndicatorRelease(g_hChartATR);
+   if(g_hADX != INVALID_HANDLE) IndicatorRelease(g_hADX);
    ChartRedraw();
 }
 
@@ -1312,9 +1322,18 @@ int OnCalculate(const int rates_total,
          ProcessHTF(2, lb, time, high, low, rates_total,
                     fullRecalc, g_barTrend2);
 
-      //=== Phase 3: BULL/BEAR signals with S/A/B ranking ===
+      //=== Phase 3: BULL/BEAR signals with S/A/B ranking + range filter ===
       int prevMaster = 0;
       int startSig = InpEMA8 + 10;
+      int lastSignalBar = -9999;  // Anti-whipsaw: track last signal bar
+
+      // Get ADX + ATR buffers for range filter
+      double adxBuf[];
+      double atrBuf[];
+      ArraySetAsSeries(adxBuf, false);
+      ArraySetAsSeries(atrBuf, false);
+      int adxCopied = CopyBuffer(g_hADX, 0, 0, rates_total, adxBuf);
+      int atrCopied = CopyBuffer(g_hChartATR, 0, 0, rates_total, atrBuf);
 
       for(int i = startSig; i < rates_total; i++)
       {
@@ -1335,8 +1354,27 @@ int OnCalculate(const int rates_total,
          else if(aBear) nT = -1;
          else nT = prevMaster;
 
+         // --- Range Filter: 3-layer check ---
+         bool passRange = true;
+
+         // Filter 1: ADX threshold — low ADX = ranging market
+         if(adxCopied > i && adxBuf[i] < InpADXThreshold)
+            passRange = false;
+
+         // Filter 2: Ribbon width vs ATR — narrow ribbon = chop
+         if(atrCopied > i && atrBuf[i] > 0)
+         {
+            double ribbonW = MathAbs(g_ed0[i] - g_ed7[i]);
+            if(ribbonW < atrBuf[i] * InpRibbonATR)
+               passRange = false;
+         }
+
+         // Filter 3: Anti-whipsaw cooldown — prevent rapid flipping
+         if((i - lastSignalBar) < InpCooldownBars)
+            passRange = false;
+
          // --- Signal scoring (S/A/B rank) ---
-         if((nT == 1 && prevMaster != 1) || (nT == -1 && prevMaster != -1))
+         if(passRange && ((nT == 1 && prevMaster != 1) || (nT == -1 && prevMaster != -1)))
          {
             int score = 0;
             bool isBull = (nT == 1);
@@ -1406,6 +1444,8 @@ int OnCalculate(const int rates_total,
                   time[i], high[i], bTxt, dotC, true, txtSz);
             }
 
+            lastSignalBar = i;  // Update anti-whipsaw tracker
+
             // Alert on latest bar
             if(i == rates_total - 1 && prev_calculated > 0 && time[i] > g_lastNotifyTime)
             {
@@ -1415,7 +1455,11 @@ int OnCalculate(const int rates_total,
             }
          }
 
-         prevMaster = nT;
+         // Only update master trend when signal actually fires or no transition
+         // If range filter blocked a transition, keep prevMaster so signal retries later
+         bool isTransition = (nT == 1 && prevMaster != 1) || (nT == -1 && prevMaster != -1);
+         if(!isTransition || passRange)
+            prevMaster = nT;
       }
       g_masterTrend = prevMaster;
 
