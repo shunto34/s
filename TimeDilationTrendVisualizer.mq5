@@ -6,7 +6,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Time Dilation Trend Visualizer [EZPZ]"
 #property link      ""
-#property version   "4.00"
+#property version   "4.10"
 #property indicator_chart_window
 
 #property indicator_buffers 21
@@ -58,13 +58,13 @@
 #property indicator_type8   DRAW_ARROW
 #property indicator_color8  C'0,220,120'
 #property indicator_style8  STYLE_SOLID
-#property indicator_width8  9
+#property indicator_width8  25
 
 #property indicator_label9  "BEAR"
 #property indicator_type9   DRAW_ARROW
 #property indicator_color9  C'255,70,70'
 #property indicator_style9  STYLE_SOLID
-#property indicator_width9  9
+#property indicator_width9  25
 
 #property indicator_label10 "ColorCandle"
 #property indicator_type10  DRAW_COLOR_CANDLES
@@ -711,7 +711,7 @@ void UpdateMSSPanel(int trend0, int trend1, int trend2,
 //+------------------------------------------------------------------+
 void CreateTrendPanel()
 {
-   int px = 10, py = 190, pw = 175, ph = 160;
+   int px = 60, py = 190, pw = 175, ph = 160;
 
    string bg = g_prefix + "TrendBg";
    if(ObjectFind(0, bg) < 0)
