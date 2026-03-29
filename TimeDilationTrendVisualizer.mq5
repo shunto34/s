@@ -158,6 +158,10 @@ int g_hTrendATR[4];
 //--- Chart ATR handle for adaptive scoring
 int g_hChartATR;
 
+//--- Panel visibility toggle
+bool g_showMSS   = true;
+bool g_showTrend  = true;
+
 //+------------------------------------------------------------------+
 int OnInit()
 {
@@ -233,6 +237,7 @@ int OnInit()
    CreateWatermark();
    CreateMSSPanel();
    CreateTrendPanel();
+   CreateToggleButtons();
 
    IndicatorSetString(INDICATOR_SHORTNAME, "[FAD]TimeDilationTrendVisualizer");
    return(INIT_SUCCEEDED);
@@ -286,6 +291,57 @@ void CreateUI()
    MakeButtonCorner(g_prefix+"BtnH1",  "H1",  x+3*(w+gap),   y, w, h, CORNER_LEFT_UPPER);
    MakeButtonCorner(g_prefix+"BtnH4",  "H4",  x+4*(w+gap),   y, w, h, CORNER_LEFT_UPPER);
    MakeButtonCorner(g_prefix+"BtnD1",  "D1",  x+5*(w+gap),   y, w, h, CORNER_LEFT_UPPER);
+}
+
+//+------------------------------------------------------------------+
+void SetMSSPanelVisible(bool visible)
+{
+   string names[] = {"MSSBg","MSSTitle","MSSScore","MSSDir",
+                     "MSSTF0","MSSTF1","MSSTF2",
+                     "MSSArr0","MSSArr1","MSSArr2"};
+   for(int i = 0; i < ArraySize(names); i++)
+   {
+      string nm = g_prefix + names[i];
+      if(ObjectFind(0, nm) >= 0)
+         ObjectSetInteger(0, nm, OBJPROP_TIMEFRAMES, visible ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS);
+   }
+}
+
+void SetTrendPanelVisible(bool visible)
+{
+   string nm;
+   nm = g_prefix + "TrendBg";
+   if(ObjectFind(0, nm) >= 0)
+      ObjectSetInteger(0, nm, OBJPROP_TIMEFRAMES, visible ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS);
+   nm = g_prefix + "TrendTitle";
+   if(ObjectFind(0, nm) >= 0)
+      ObjectSetInteger(0, nm, OBJPROP_TIMEFRAMES, visible ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS);
+   for(int i = 0; i < 4; i++)
+   {
+      nm = g_prefix + "TrTF" + IntegerToString(i);
+      if(ObjectFind(0, nm) >= 0)
+         ObjectSetInteger(0, nm, OBJPROP_TIMEFRAMES, visible ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS);
+      nm = g_prefix + "TrSt" + IntegerToString(i);
+      if(ObjectFind(0, nm) >= 0)
+         ObjectSetInteger(0, nm, OBJPROP_TIMEFRAMES, visible ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS);
+   }
+}
+
+void CreateToggleButtons()
+{
+   // MSS toggle button (left-bottom, above the MSS panel)
+   MakeButtonCorner(g_prefix+"TogMSS", "MSS", 10, 270, 42, 20, CORNER_LEFT_LOWER);
+   ObjectSetInteger(0, g_prefix+"TogMSS", OBJPROP_FONTSIZE, 8);
+   ObjectSetInteger(0, g_prefix+"TogMSS", OBJPROP_BGCOLOR, g_showMSS ? C'30,32,48' : C'60,30,30');
+   ObjectSetInteger(0, g_prefix+"TogMSS", OBJPROP_STATE, false);
+
+   // Trend toggle button (right-bottom, above the Trend panel)
+   int chartW = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
+   int trendPx = chartW - 175 - 80;
+   MakeButtonCorner(g_prefix+"TogTrend", "TRD", trendPx, 270, 42, 20, CORNER_LEFT_LOWER);
+   ObjectSetInteger(0, g_prefix+"TogTrend", OBJPROP_FONTSIZE, 8);
+   ObjectSetInteger(0, g_prefix+"TogTrend", OBJPROP_BGCOLOR, g_showTrend ? C'30,32,48' : C'60,30,30');
+   ObjectSetInteger(0, g_prefix+"TogTrend", OBJPROP_STATE, false);
 }
 
 //+------------------------------------------------------------------+
@@ -1400,10 +1456,35 @@ void OnChartEvent(const int id, const long &lparam,
       CreateWatermark();
       CreateMSSPanel();
       CreateTrendPanel();
+      CreateToggleButtons();
+      if(!g_showMSS)   SetMSSPanelVisible(false);
+      if(!g_showTrend)  SetTrendPanelVisible(false);
       return;
    }
 
    if(id != CHARTEVENT_OBJECT_CLICK) return;
+
+   // MSS panel toggle
+   if(sparam == g_prefix+"TogMSS")
+   {
+      g_showMSS = !g_showMSS;
+      SetMSSPanelVisible(g_showMSS);
+      ObjectSetInteger(0, sparam, OBJPROP_BGCOLOR, g_showMSS ? C'30,32,48' : C'60,30,30');
+      ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
+      ChartRedraw();
+      return;
+   }
+
+   // Trend panel toggle
+   if(sparam == g_prefix+"TogTrend")
+   {
+      g_showTrend = !g_showTrend;
+      SetTrendPanelVisible(g_showTrend);
+      ObjectSetInteger(0, sparam, OBJPROP_BGCOLOR, g_showTrend ? C'30,32,48' : C'60,30,30');
+      ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
+      ChartRedraw();
+      return;
+   }
 
    if(sparam == g_prefix+"BtnM1")
    { ChartSetSymbolPeriod(0, _Symbol, PERIOD_M1);  ObjectSetInteger(0, sparam, OBJPROP_STATE, false); }
