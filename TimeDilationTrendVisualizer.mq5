@@ -264,8 +264,8 @@ void OnDeinit(const int reason)
 void MakeButtonCorner(string name, string text, int x, int y, int w, int h,
                       ENUM_BASE_CORNER corner)
 {
-   ObjectDelete(0, name);
-   ObjectCreate(0, name, OBJ_BUTTON, 0, 0, 0);
+   if(ObjectFind(0, name) < 0)
+      ObjectCreate(0, name, OBJ_BUTTON, 0, 0, 0);
    ObjectSetInteger(0, name, OBJPROP_CORNER, corner);
    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
@@ -318,18 +318,35 @@ void DeleteTrendPanelObjects()
 void CreateToggleButtons()
 {
    // Place toggle buttons in the top bar, right after TF buttons (M1..D1)
-   // TF buttons: x=10, w=42, gap=2, 6 buttons → ends at 10 + 6*(42+2) = 274
    int x0 = 280, y = 50, w = 42, h = 24;
+   MakeButtonCorner(g_prefix+"TogMSS",   "MSS", x0,         y, w, h, CORNER_LEFT_UPPER);
+   MakeButtonCorner(g_prefix+"TogTrend",  "TRD", x0 + (w+2), y, w, h, CORNER_LEFT_UPPER);
+   UpdateToggleButtons();
+}
 
-   // MSS panel toggle
-   MakeButtonCorner(g_prefix+"TogMSS", g_showMSS ? "MSS" : "mss", x0, y, w, h, CORNER_LEFT_UPPER);
-   ObjectSetInteger(0, g_prefix+"TogMSS", OBJPROP_BGCOLOR, g_showMSS ? C'25,80,60' : C'80,30,30');
-   ObjectSetInteger(0, g_prefix+"TogMSS", OBJPROP_STATE, false);
+void UpdateToggleButtons()
+{
+   string mss = g_prefix + "TogMSS";
+   if(ObjectFind(0, mss) >= 0)
+   {
+      ObjectSetString(0, mss, OBJPROP_TEXT, g_showMSS ? "MSS" : "mss");
+      ObjectSetInteger(0, mss, OBJPROP_BGCOLOR, g_showMSS ? C'25,80,60' : C'80,30,30');
+      ObjectSetInteger(0, mss, OBJPROP_STATE, false);
+   }
+   string trd = g_prefix + "TogTrend";
+   if(ObjectFind(0, trd) >= 0)
+   {
+      ObjectSetString(0, trd, OBJPROP_TEXT, g_showTrend ? "TRD" : "trd");
+      ObjectSetInteger(0, trd, OBJPROP_BGCOLOR, g_showTrend ? C'25,80,60' : C'80,30,30');
+      ObjectSetInteger(0, trd, OBJPROP_STATE, false);
+   }
+}
 
-   // Trend panel toggle
-   MakeButtonCorner(g_prefix+"TogTrend", g_showTrend ? "TRD" : "trd", x0 + (w+2), y, w, h, CORNER_LEFT_UPPER);
-   ObjectSetInteger(0, g_prefix+"TogTrend", OBJPROP_BGCOLOR, g_showTrend ? C'25,80,60' : C'80,30,30');
-   ObjectSetInteger(0, g_prefix+"TogTrend", OBJPROP_STATE, false);
+void EnforcePanelVisibility()
+{
+   if(!g_showMSS)   DeleteMSSPanelObjects();
+   if(!g_showTrend)  DeleteTrendPanelObjects();
+   UpdateToggleButtons();
 }
 
 //+------------------------------------------------------------------+
@@ -1265,6 +1282,7 @@ int OnCalculate(const int rates_total,
          CreateMSSPanel();
          CreateTrendPanel();
          CreateToggleButtons();
+         EnforcePanelVisibility();
       }
 
       // Resize per-bar trend arrays
@@ -1434,6 +1452,9 @@ int OnCalculate(const int rates_total,
          }
       }
 
+      // Enforce panel visibility after all object operations
+      EnforcePanelVisibility();
+
       ChartRedraw();
    }
 
@@ -1450,6 +1471,7 @@ void OnChartEvent(const int id, const long &lparam,
       CreateMSSPanel();
       CreateTrendPanel();
       CreateToggleButtons();
+      EnforcePanelVisibility();
       return;
    }
 
@@ -1461,7 +1483,8 @@ void OnChartEvent(const int id, const long &lparam,
       g_showMSS = !g_showMSS;
       if(!g_showMSS) DeleteMSSPanelObjects();
       else           CreateMSSPanel();
-      CreateToggleButtons();
+      // Update button appearance WITHOUT delete/recreate
+      UpdateToggleButtons();
       ChartRedraw();
       return;
    }
@@ -1472,7 +1495,8 @@ void OnChartEvent(const int id, const long &lparam,
       g_showTrend = !g_showTrend;
       if(!g_showTrend) DeleteTrendPanelObjects();
       else             CreateTrendPanel();
-      CreateToggleButtons();
+      // Update button appearance WITHOUT delete/recreate
+      UpdateToggleButtons();
       ChartRedraw();
       return;
    }
