@@ -55,16 +55,10 @@
 #property indicator_width7  1
 
 #property indicator_label8  "BULL"
-#property indicator_type8   DRAW_ARROW
-#property indicator_color8  C'0,220,120'
-#property indicator_style8  STYLE_SOLID
-#property indicator_width8  25
+#property indicator_type8   DRAW_NONE
 
 #property indicator_label9  "BEAR"
-#property indicator_type9   DRAW_ARROW
-#property indicator_color9  C'255,70,70'
-#property indicator_style9  STYLE_SOLID
-#property indicator_width9  25
+#property indicator_type9   DRAW_NONE
 
 #property indicator_label10 "ColorCandle"
 #property indicator_type10  DRAW_COLOR_CANDLES
@@ -195,9 +189,7 @@ int OnInit()
    SetIndexBuffer(19, g_candleC,   INDICATOR_DATA);
    SetIndexBuffer(20, g_candleClr, INDICATOR_COLOR_INDEX);
 
-   PlotIndexSetInteger(7, PLOT_ARROW, 159);
    PlotIndexSetDouble(7, PLOT_EMPTY_VALUE, EMPTY_VALUE);
-   PlotIndexSetInteger(8, PLOT_ARROW, 159);
    PlotIndexSetDouble(8, PLOT_EMPTY_VALUE, EMPTY_VALUE);
 
    int lens[8];
@@ -976,6 +968,20 @@ void CreateSignalLabel(string tag, datetime dt, double pr,
                     above ? ANCHOR_LOWER : ANCHOR_UPPER);
 }
 
+void CreateSignalDot(string tag, datetime dt, double pr,
+                     color c, bool above, int dotSize = 28)
+{
+   string nm = g_prefix + tag;
+   if(ObjectFind(0, nm) >= 0) return;
+   ObjectCreate(0, nm, OBJ_TEXT, 0, dt, pr);
+   ObjectSetString(0, nm, OBJPROP_TEXT, CharToString(108));  // Wingdings large dot
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, c);
+   ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, dotSize);
+   ObjectSetString(0, nm, OBJPROP_FONT, "Wingdings");
+   ObjectSetInteger(0, nm, OBJPROP_ANCHOR,
+                    above ? ANCHOR_LOWER : ANCHOR_UPPER);
+}
+
 //+------------------------------------------------------------------+
 void MakeKeyLevel(bool isHi, double pr, datetime t1, datetime t2)
 {
@@ -1372,27 +1378,32 @@ int OnCalculate(const int rates_total,
             if(curWidth > 0 && minW < curWidth * 0.5) score++;
 
             // Rank: S(3-4), A(2), B(0-1)
+            // Rank: S(3-4), A(2), B(0-1) — all ranks show dot + text
+            string rank = (score >= 3) ? "S" : (score == 2) ? "A" : "B";
+
             if(isBull)
             {
                g_bullSignal[i] = low[i];
-               if(score >= 3)
-                  CreateSignalLabel("SigBull" + IntegerToString(i),
-                     time[i], low[i], "BULL \x2605", C'0,255,140', false, 12);
-               else if(score == 2)
-                  CreateSignalLabel("SigBull" + IntegerToString(i),
-                     time[i], low[i], "BULL", C'0,220,120', false);
-               // B rank: dot only, no text label
+               color dotC = (score >= 3) ? C'0,255,140' : (score == 2) ? C'0,220,120' : C'0,180,100';
+               int dotSz = (score >= 3) ? 32 : 28;
+               int txtSz = (score >= 3) ? 12 : 10;
+               CreateSignalDot("DotBull" + IntegerToString(i),
+                  time[i], low[i], dotC, false, dotSz);
+               string bTxt = (score >= 3) ? "BULL \x2605" : "BULL";
+               CreateSignalLabel("SigBull" + IntegerToString(i),
+                  time[i], low[i], bTxt, dotC, false, txtSz);
             }
             else
             {
                g_bearSignal[i] = high[i];
-               if(score >= 3)
-                  CreateSignalLabel("SigBear" + IntegerToString(i),
-                     time[i], high[i], "BEAR \x2605", C'255,50,50', true, 12);
-               else if(score == 2)
-                  CreateSignalLabel("SigBear" + IntegerToString(i),
-                     time[i], high[i], "BEAR", C'255,70,70', true);
-               // B rank: dot only, no text label
+               color dotC = (score >= 3) ? C'255,50,50' : (score == 2) ? C'255,70,70' : C'255,100,100';
+               int dotSz = (score >= 3) ? 32 : 28;
+               int txtSz = (score >= 3) ? 12 : 10;
+               CreateSignalDot("DotBear" + IntegerToString(i),
+                  time[i], high[i], dotC, true, dotSz);
+               string bTxt = (score >= 3) ? "BEAR \x2605" : "BEAR";
+               CreateSignalLabel("SigBear" + IntegerToString(i),
+                  time[i], high[i], bTxt, dotC, true, txtSz);
             }
 
             // Alert on latest bar
