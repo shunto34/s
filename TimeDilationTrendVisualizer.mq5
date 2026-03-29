@@ -6,7 +6,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Time Dilation Trend Visualizer [EZPZ]"
 #property link      ""
-#property version   "3.50"
+#property version   "4.00"
 #property indicator_chart_window
 
 #property indicator_buffers 21
@@ -148,6 +148,16 @@ string g_loNames[];
 //--- Push notification duplicate prevention
 datetime g_lastNotifyTime = 0;
 
+//--- Trend Status Panel handles (M5/M15/H1/H4)
+ENUM_TIMEFRAMES g_trendTF[4];
+string g_trendTFName[4];
+int g_hTrendEMA20[4];
+int g_hTrendEMA50[4];
+int g_hTrendATR[4];
+
+//--- Chart ATR handle for adaptive scoring
+int g_hChartATR;
+
 //+------------------------------------------------------------------+
 int OnInit()
 {
@@ -202,9 +212,27 @@ int OnInit()
    ArrayResize(g_hiNames, 0);
    ArrayResize(g_loNames, 0);
 
+   // Trend Status Panel: EMA20/50 + ATR for M5/M15/H1/H4
+   g_trendTF[0] = PERIOD_M5;  g_trendTFName[0] = "M5";
+   g_trendTF[1] = PERIOD_M15; g_trendTFName[1] = "M15";
+   g_trendTF[2] = PERIOD_H1;  g_trendTFName[2] = "H1";
+   g_trendTF[3] = PERIOD_H4;  g_trendTFName[3] = "H4";
+
+   for(int i = 0; i < 4; i++)
+   {
+      g_hTrendEMA20[i] = iMA(_Symbol, g_trendTF[i], 20, 0, MODE_EMA, PRICE_CLOSE);
+      g_hTrendEMA50[i] = iMA(_Symbol, g_trendTF[i], 50, 0, MODE_EMA, PRICE_CLOSE);
+      g_hTrendATR[i]   = iATR(_Symbol, g_trendTF[i], 14);
+      if(g_hTrendEMA20[i]==INVALID_HANDLE || g_hTrendEMA50[i]==INVALID_HANDLE || g_hTrendATR[i]==INVALID_HANDLE)
+         return(INIT_FAILED);
+   }
+   g_hChartATR = iATR(_Symbol, PERIOD_CURRENT, 14);
+   if(g_hChartATR == INVALID_HANDLE) return(INIT_FAILED);
+
    CreateUI();
    CreateWatermark();
    CreateMSSPanel();
+   CreateTrendPanel();
 
    IndicatorSetString(INDICATOR_SHORTNAME, "[FAD]TimeDilationTrendVisualizer");
    return(INIT_SUCCEEDED);
@@ -217,6 +245,13 @@ void OnDeinit(const int reason)
    for(int i = 0; i < 8; i++)
       if(g_hEMA[i] != INVALID_HANDLE)
          IndicatorRelease(g_hEMA[i]);
+   for(int i = 0; i < 4; i++)
+   {
+      if(g_hTrendEMA20[i] != INVALID_HANDLE) IndicatorRelease(g_hTrendEMA20[i]);
+      if(g_hTrendEMA50[i] != INVALID_HANDLE) IndicatorRelease(g_hTrendEMA50[i]);
+      if(g_hTrendATR[i] != INVALID_HANDLE) IndicatorRelease(g_hTrendATR[i]);
+   }
+   if(g_hChartATR != INVALID_HANDLE) IndicatorRelease(g_hChartATR);
    ChartRedraw();
 }
 
@@ -244,7 +279,7 @@ void MakeButtonCorner(string name, string text, int x, int y, int w, int h,
 //+------------------------------------------------------------------+
 void CreateUI()
 {
-   int x = 10, y = 20, w = 42, h = 24, gap = 2;
+   int x = 10, y = 50, w = 42, h = 24, gap = 2;
    MakeButtonCorner(g_prefix+"BtnM1",  "M1",  x,             y, w, h, CORNER_LEFT_UPPER);
    MakeButtonCorner(g_prefix+"BtnM5",  "M5",  x+(w+gap),     y, w, h, CORNER_LEFT_UPPER);
    MakeButtonCorner(g_prefix+"BtnM15", "M15", x+2*(w+gap),   y, w, h, CORNER_LEFT_UPPER);
@@ -278,9 +313,8 @@ void CreateWatermark()
 //+------------------------------------------------------------------+
 void CreateMSSPanel()
 {
-   int px = 10, py = 155, pw = 150, ph = 140;
+   int px = 10, py = 190, pw = 165, ph = 175;
 
-   // Background box
    string bg = g_prefix + "MSSBg";
    if(ObjectFind(0, bg) < 0)
    {
@@ -290,8 +324,8 @@ void CreateMSSPanel()
       ObjectSetInteger(0, bg, OBJPROP_YDISTANCE, py);
       ObjectSetInteger(0, bg, OBJPROP_XSIZE, pw);
       ObjectSetInteger(0, bg, OBJPROP_YSIZE, ph);
-      ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'25,27,42');
-      ObjectSetInteger(0, bg, OBJPROP_BORDER_COLOR, C'55,70,120');
+      ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'20,22,38');
+      ObjectSetInteger(0, bg, OBJPROP_BORDER_COLOR, C'50,65,110');
       ObjectSetInteger(0, bg, OBJPROP_BORDER_TYPE, BORDER_FLAT);
       ObjectSetInteger(0, bg, OBJPROP_BACK, false);
       ObjectSetInteger(0, bg, OBJPROP_SELECTABLE, false);
@@ -303,9 +337,9 @@ void CreateMSSPanel()
    {
       ObjectCreate(0, tt, OBJ_LABEL, 0, 0, 0);
       ObjectSetInteger(0, tt, OBJPROP_CORNER, CORNER_LEFT_LOWER);
-      ObjectSetInteger(0, tt, OBJPROP_XDISTANCE, px + 18);
+      ObjectSetInteger(0, tt, OBJPROP_XDISTANCE, px + 22);
       ObjectSetInteger(0, tt, OBJPROP_YDISTANCE, py - 8);
-      ObjectSetString(0, tt, OBJPROP_TEXT, "MSS ALIGN");
+      ObjectSetString(0, tt, OBJPROP_TEXT, "MSS SCORE");
       ObjectSetString(0, tt, OBJPROP_FONT, "Arial Bold");
       ObjectSetInteger(0, tt, OBJPROP_FONTSIZE, 11);
       ObjectSetInteger(0, tt, OBJPROP_COLOR, C'160,170,200');
@@ -313,39 +347,70 @@ void CreateMSSPanel()
       ObjectSetInteger(0, tt, OBJPROP_SELECTABLE, false);
    }
 
-   // 3 rows: TF name + arrow
+   // Score value (big number)
+   string sv = g_prefix + "MSSScore";
+   if(ObjectFind(0, sv) < 0)
+   {
+      ObjectCreate(0, sv, OBJ_LABEL, 0, 0, 0);
+      ObjectSetInteger(0, sv, OBJPROP_CORNER, CORNER_LEFT_LOWER);
+      ObjectSetInteger(0, sv, OBJPROP_XDISTANCE, px + 45);
+      ObjectSetInteger(0, sv, OBJPROP_YDISTANCE, py - 42);
+      ObjectSetString(0, sv, OBJPROP_TEXT, "---");
+      ObjectSetString(0, sv, OBJPROP_FONT, "Arial Bold");
+      ObjectSetInteger(0, sv, OBJPROP_FONTSIZE, 28);
+      ObjectSetInteger(0, sv, OBJPROP_COLOR, C'100,100,115');
+      ObjectSetInteger(0, sv, OBJPROP_BACK, false);
+      ObjectSetInteger(0, sv, OBJPROP_SELECTABLE, false);
+   }
+
+   // Direction label
+   string dl = g_prefix + "MSSDir";
+   if(ObjectFind(0, dl) < 0)
+   {
+      ObjectCreate(0, dl, OBJ_LABEL, 0, 0, 0);
+      ObjectSetInteger(0, dl, OBJPROP_CORNER, CORNER_LEFT_LOWER);
+      ObjectSetInteger(0, dl, OBJPROP_XDISTANCE, px + 30);
+      ObjectSetInteger(0, dl, OBJPROP_YDISTANCE, py - 82);
+      ObjectSetString(0, dl, OBJPROP_TEXT, "---");
+      ObjectSetString(0, dl, OBJPROP_FONT, "Arial Bold");
+      ObjectSetInteger(0, dl, OBJPROP_FONTSIZE, 11);
+      ObjectSetInteger(0, dl, OBJPROP_COLOR, C'100,100,115');
+      ObjectSetInteger(0, dl, OBJPROP_BACK, false);
+      ObjectSetInteger(0, dl, OBJPROP_SELECTABLE, false);
+   }
+
+   // TF dots row (M5 M15 H1)
    string tfLabels[3] = {"M5", "M15", "H1"};
-   int rowY[3] = {py - 42, py - 72, py - 102};
+   int dotX[3] = {px + 12, px + 60, px + 115};
+   int dotY = py - 110;
 
    for(int i = 0; i < 3; i++)
    {
-      // TF name label
       string tfLbl = g_prefix + "MSSTF" + IntegerToString(i);
       if(ObjectFind(0, tfLbl) < 0)
       {
          ObjectCreate(0, tfLbl, OBJ_LABEL, 0, 0, 0);
          ObjectSetInteger(0, tfLbl, OBJPROP_CORNER, CORNER_LEFT_LOWER);
-         ObjectSetInteger(0, tfLbl, OBJPROP_XDISTANCE, px + 15);
-         ObjectSetInteger(0, tfLbl, OBJPROP_YDISTANCE, rowY[i]);
+         ObjectSetInteger(0, tfLbl, OBJPROP_XDISTANCE, dotX[i]);
+         ObjectSetInteger(0, tfLbl, OBJPROP_YDISTANCE, dotY);
          ObjectSetString(0, tfLbl, OBJPROP_TEXT, tfLabels[i]);
          ObjectSetString(0, tfLbl, OBJPROP_FONT, "Arial Bold");
-         ObjectSetInteger(0, tfLbl, OBJPROP_FONTSIZE, 12);
-         ObjectSetInteger(0, tfLbl, OBJPROP_COLOR, C'190,200,220');
+         ObjectSetInteger(0, tfLbl, OBJPROP_FONTSIZE, 10);
+         ObjectSetInteger(0, tfLbl, OBJPROP_COLOR, C'130,140,160');
          ObjectSetInteger(0, tfLbl, OBJPROP_BACK, false);
          ObjectSetInteger(0, tfLbl, OBJPROP_SELECTABLE, false);
       }
 
-      // Arrow label
       string arrLbl = g_prefix + "MSSArr" + IntegerToString(i);
       if(ObjectFind(0, arrLbl) < 0)
       {
          ObjectCreate(0, arrLbl, OBJ_LABEL, 0, 0, 0);
          ObjectSetInteger(0, arrLbl, OBJPROP_CORNER, CORNER_LEFT_LOWER);
-         ObjectSetInteger(0, arrLbl, OBJPROP_XDISTANCE, px + 95);
-         ObjectSetInteger(0, arrLbl, OBJPROP_YDISTANCE, rowY[i]);
-         ObjectSetString(0, arrLbl, OBJPROP_TEXT, "---");
-         ObjectSetString(0, arrLbl, OBJPROP_FONT, "Arial Bold");
-         ObjectSetInteger(0, arrLbl, OBJPROP_FONTSIZE, 14);
+         ObjectSetInteger(0, arrLbl, OBJPROP_XDISTANCE, dotX[i] + 5);
+         ObjectSetInteger(0, arrLbl, OBJPROP_YDISTANCE, dotY - 22);
+         ObjectSetString(0, arrLbl, OBJPROP_TEXT, CharToString(159));
+         ObjectSetString(0, arrLbl, OBJPROP_FONT, "Wingdings");
+         ObjectSetInteger(0, arrLbl, OBJPROP_FONTSIZE, 12);
          ObjectSetInteger(0, arrLbl, OBJPROP_COLOR, C'100,100,115');
          ObjectSetInteger(0, arrLbl, OBJPROP_BACK, false);
          ObjectSetInteger(0, arrLbl, OBJPROP_SELECTABLE, false);
@@ -354,69 +419,380 @@ void CreateMSSPanel()
 }
 
 //+------------------------------------------------------------------+
-void UpdateMSSPanel(int trend0, int trend1, int trend2)
+int CalcMSSScore(int t0, int t1, int t2,
+                 const double &close[], const double &open[], const double &high[],
+                 const double &low[], const long &tickVol[], int idx, int total)
+{
+   // Determine dominant direction
+   int buCnt = 0, beCnt = 0;
+   if(t0 == 1)  buCnt++; if(t0 == -1) beCnt++;
+   if(t1 == 1)  buCnt++; if(t1 == -1) beCnt++;
+   if(t2 == 1)  buCnt++; if(t2 == -1) beCnt++;
+   bool isBull = (buCnt >= beCnt);
+   int dir = isBull ? 1 : -1;
+   double score = 0.0;
+
+   // === A. MTF Alignment (max 35pt) ===
+   if(t0 == dir) score += 10.0;
+   if(t1 == dir) score += 12.0;
+   if(t2 == dir) score += 13.0;
+   if(t0 == dir && t1 == dir && t2 == dir) score += 8.0;
+   if(score > 35.0) score = 35.0;
+
+   // === B. EMA Structure (max 25pt) ===
+   if(idx >= 0 && idx < total)
+   {
+      bool perfOrder;
+      if(isBull)
+         perfOrder = g_ed0[idx]>g_ed1[idx] && g_ed1[idx]>g_ed2[idx] && g_ed2[idx]>g_ed3[idx]
+                  && g_ed3[idx]>g_ed4[idx] && g_ed4[idx]>g_ed5[idx] && g_ed5[idx]>g_ed6[idx]
+                  && g_ed6[idx]>g_ed7[idx];
+      else
+         perfOrder = g_ed0[idx]<g_ed1[idx] && g_ed1[idx]<g_ed2[idx] && g_ed2[idx]<g_ed3[idx]
+                  && g_ed3[idx]<g_ed4[idx] && g_ed4[idx]<g_ed5[idx] && g_ed5[idx]<g_ed6[idx]
+                  && g_ed6[idx]<g_ed7[idx];
+      if(perfOrder) score += 12.0;
+
+      // Ribbon squeeze expansion
+      double curWidth = MathAbs(g_ed0[idx] - g_ed7[idx]);
+      double minW = curWidth;
+      int sqLook = MathMin(10, idx);
+      for(int j = idx - sqLook; j < idx; j++)
+         minW = MathMin(minW, MathAbs(g_ed0[j] - g_ed7[j]));
+      if(curWidth > 0 && minW < curWidth * 0.5) score += 8.0;
+
+      // EMA slope acceleration
+      if(idx >= 5)
+      {
+         double slope1 = g_ed0[idx] - g_ed0[idx - 3];
+         int backIdx = (idx - 6 >= 0) ? idx - 6 : 0;
+         double slope2 = g_ed0[idx - 3] - g_ed0[backIdx];
+         bool accel = isBull ? (slope1 > slope2 && slope1 > 0) : (slope1 < slope2 && slope1 < 0);
+         if(accel) score += 5.0;
+      }
+   }
+
+   // === C. Volume Confirmation (max 15pt) ===
+   if(idx >= 20 && idx < total)
+   {
+      double avgVol = 0;
+      for(int j = idx - 20; j < idx; j++) avgVol += (double)tickVol[j];
+      avgVol /= 20.0;
+      if(avgVol > 0 && (double)tickVol[idx] > avgVol * 1.5) score += 8.0;
+
+      // Volume increasing trend (last 5 bars)
+      if(idx >= 5)
+      {
+         int volUp = 0;
+         for(int j = idx - 4; j <= idx; j++)
+            if(j > 0 && tickVol[j] > tickVol[j-1]) volUp++;
+         if(volUp >= 3) score += 7.0;
+      }
+   }
+
+   // === D. Momentum Acceleration (max 15pt) ===
+   if(idx >= 20 && idx < total)
+   {
+      // Body/ATR ratio
+      double atrVal[1];
+      if(CopyBuffer(g_hChartATR, 0, total - 1 - idx, 1, atrVal) == 1 && atrVal[0] > 0)
+      {
+         double bodySize = MathAbs(close[idx] - open[idx]);
+         if(bodySize / atrVal[0] > 0.7) score += 5.0;
+      }
+
+      // Consecutive same-direction candles
+      int consec = 0;
+      for(int j = idx; j >= MathMax(0, idx - 5); j--)
+      {
+         if(isBull && close[j] > open[j]) consec++;
+         else if(!isBull && close[j] < open[j]) consec++;
+         else break;
+      }
+      if(consec >= 3) score += 5.0;
+
+      // ADX-like strength (manual DI+/DI- calculation)
+      double dmPlus = 0, dmMinus = 0, tr = 0;
+      int adxLen = MathMin(14, idx);
+      for(int j = idx - adxLen + 1; j <= idx; j++)
+      {
+         if(j <= 0) continue;
+         double hDiff = high[j] - high[j-1];
+         double lDiff = low[j-1] - low[j];
+         if(hDiff > lDiff && hDiff > 0) dmPlus += hDiff;
+         if(lDiff > hDiff && lDiff > 0) dmMinus += lDiff;
+         double trVal = MathMax(high[j]-low[j], MathMax(MathAbs(high[j]-close[j-1]), MathAbs(low[j]-close[j-1])));
+         tr += trVal;
+      }
+      if(tr > 0)
+      {
+         double diPlus = dmPlus / tr * 100;
+         double diMinus = dmMinus / tr * 100;
+         double adxStr = MathAbs(diPlus - diMinus);
+         if(isBull && diPlus > diMinus && adxStr > 15) score += 5.0;
+         if(!isBull && diMinus > diPlus && adxStr > 15) score += 5.0;
+      }
+   }
+
+   // === E. Key Level Breakout (max 10pt) ===
+   if(idx >= 20 && idx < total)
+   {
+      double hh = high[idx], ll = low[idx];
+      for(int j = idx - 20; j < idx; j++)
+      {
+         if(high[j] > hh) hh = high[j];
+         if(low[j] < ll) ll = low[j];
+      }
+      if(isBull && close[idx] >= hh) score += 5.0;
+      if(!isBull && close[idx] <= ll) score += 5.0;
+
+      // No pullback (momentum sustained)
+      if(idx >= 3)
+      {
+         bool sustained = true;
+         for(int j = idx - 2; j <= idx; j++)
+         {
+            if(isBull && close[j] < open[j]) { sustained = false; break; }
+            if(!isBull && close[j] > open[j]) { sustained = false; break; }
+         }
+         if(sustained) score += 5.0;
+      }
+   }
+
+   int finalScore = (int)MathMin(100.0, MathMax(0.0, score));
+   return(finalScore);
+}
+
+void UpdateMSSPanel(int trend0, int trend1, int trend2,
+                    const double &close[], const double &open[], const double &high[],
+                    const double &low[], const long &tickVol[], int idx, int total)
 {
    int trends[3];
-   trends[0] = trend0;
-   trends[1] = trend1;
-   trends[2] = trend2;
+   trends[0] = trend0; trends[1] = trend1; trends[2] = trend2;
 
+   // Update TF direction dots
    for(int i = 0; i < 3; i++)
    {
       string arrLbl = g_prefix + "MSSArr" + IntegerToString(i);
       if(ObjectFind(0, arrLbl) < 0) continue;
-
-      if(trends[i] == 1)
-      {
-         ObjectSetString(0, arrLbl, OBJPROP_TEXT, CharToString(233));
-         ObjectSetString(0, arrLbl, OBJPROP_FONT, "Wingdings");
-         ObjectSetInteger(0, arrLbl, OBJPROP_FONTSIZE, 18);
-         ObjectSetInteger(0, arrLbl, OBJPROP_COLOR, C'0,230,130');
-      }
-      else if(trends[i] == -1)
-      {
-         ObjectSetString(0, arrLbl, OBJPROP_TEXT, CharToString(234));
-         ObjectSetString(0, arrLbl, OBJPROP_FONT, "Wingdings");
-         ObjectSetInteger(0, arrLbl, OBJPROP_FONTSIZE, 18);
-         ObjectSetInteger(0, arrLbl, OBJPROP_COLOR, C'255,65,65');
-      }
-      else
-      {
-         ObjectSetString(0, arrLbl, OBJPROP_TEXT, "---");
-         ObjectSetString(0, arrLbl, OBJPROP_FONT, "Arial Bold");
-         ObjectSetInteger(0, arrLbl, OBJPROP_FONTSIZE, 14);
-         ObjectSetInteger(0, arrLbl, OBJPROP_COLOR, C'100,100,115');
-      }
+      ObjectSetString(0, arrLbl, OBJPROP_TEXT, CharToString(159));
+      ObjectSetString(0, arrLbl, OBJPROP_FONT, "Wingdings");
+      ObjectSetInteger(0, arrLbl, OBJPROP_FONTSIZE, 12);
+      if(trends[i] == 1) ObjectSetInteger(0, arrLbl, OBJPROP_COLOR, C'0,230,130');
+      else if(trends[i] == -1) ObjectSetInteger(0, arrLbl, OBJPROP_COLOR, C'255,65,65');
+      else ObjectSetInteger(0, arrLbl, OBJPROP_COLOR, C'100,100,115');
    }
 
-   // Highlight box on full alignment
+   // Calculate AI score
+   int score = CalcMSSScore(trend0, trend1, trend2, close, open, high, low, tickVol, idx, total);
+
+   // Determine direction
+   int buCnt = 0, beCnt = 0;
+   if(trend0==1) buCnt++; if(trend0==-1) beCnt++;
+   if(trend1==1) buCnt++; if(trend1==-1) beCnt++;
+   if(trend2==1) buCnt++; if(trend2==-1) beCnt++;
+   bool isBull = (buCnt >= beCnt);
+   bool allAligned = (buCnt == 3 || beCnt == 3);
+
+   // Update score display
+   string sv = g_prefix + "MSSScore";
+   if(ObjectFind(0, sv) >= 0)
+   {
+      ObjectSetString(0, sv, OBJPROP_TEXT, IntegerToString(score));
+      // Color gradient based on score
+      color scoreClr;
+      if(score >= 80) scoreClr = isBull ? C'0,255,140' : C'255,60,60';
+      else if(score >= 60) scoreClr = C'255,210,50';
+      else if(score >= 40) scoreClr = C'160,170,190';
+      else scoreClr = C'100,100,115';
+      ObjectSetInteger(0, sv, OBJPROP_COLOR, scoreClr);
+   }
+
+   // Update direction label
+   string dl = g_prefix + "MSSDir";
+   if(ObjectFind(0, dl) >= 0)
+   {
+      string dirTxt;
+      color dirClr;
+      if(allAligned && isBull) { dirTxt = ">> BULLISH"; dirClr = C'0,230,130'; }
+      else if(allAligned && !isBull) { dirTxt = "<< BEARISH"; dirClr = C'255,65,65'; }
+      else if(buCnt > beCnt) { dirTxt = "> BULL BIAS"; dirClr = C'80,190,120'; }
+      else if(beCnt > buCnt) { dirTxt = "< BEAR BIAS"; dirClr = C'210,90,90'; }
+      else { dirTxt = "- NEUTRAL"; dirClr = C'130,130,145'; }
+      ObjectSetString(0, dl, OBJPROP_TEXT, dirTxt);
+      ObjectSetString(0, dl, OBJPROP_FONT, "Arial Bold");
+      ObjectSetInteger(0, dl, OBJPROP_COLOR, dirClr);
+   }
+
+   // Highlight box
    string bg = g_prefix + "MSSBg";
    string tt = g_prefix + "MSSTitle";
    if(ObjectFind(0, bg) < 0) return;
 
-   bool allBull = (trend0 == 1  && trend1 == 1  && trend2 == 1);
-   bool allBear = (trend0 == -1 && trend1 == -1 && trend2 == -1);
-
-   if(allBull)
+   if(score >= 80 && isBull)
    {
-      ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'15,55,30');
+      ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'12,50,28');
       ObjectSetInteger(0, bg, OBJPROP_BORDER_COLOR, C'0,200,110');
-      if(ObjectFind(0, tt) >= 0)
-         ObjectSetInteger(0, tt, OBJPROP_COLOR, C'0,240,130');
+      if(ObjectFind(0, tt) >= 0) ObjectSetInteger(0, tt, OBJPROP_COLOR, C'0,240,130');
    }
-   else if(allBear)
+   else if(score >= 80 && !isBull)
    {
-      ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'55,15,20');
+      ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'50,12,18');
       ObjectSetInteger(0, bg, OBJPROP_BORDER_COLOR, C'230,50,50');
-      if(ObjectFind(0, tt) >= 0)
-         ObjectSetInteger(0, tt, OBJPROP_COLOR, C'255,80,80');
+      if(ObjectFind(0, tt) >= 0) ObjectSetInteger(0, tt, OBJPROP_COLOR, C'255,80,80');
    }
    else
    {
-      ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'25,27,42');
-      ObjectSetInteger(0, bg, OBJPROP_BORDER_COLOR, C'55,70,120');
-      if(ObjectFind(0, tt) >= 0)
-         ObjectSetInteger(0, tt, OBJPROP_COLOR, C'160,170,200');
+      ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'20,22,38');
+      ObjectSetInteger(0, bg, OBJPROP_BORDER_COLOR, C'50,65,110');
+      if(ObjectFind(0, tt) >= 0) ObjectSetInteger(0, tt, OBJPROP_COLOR, C'160,170,200');
+   }
+}
+
+//+------------------------------------------------------------------+
+void CreateTrendPanel()
+{
+   int px = 10, py = 190, pw = 175, ph = 160;
+
+   string bg = g_prefix + "TrendBg";
+   if(ObjectFind(0, bg) < 0)
+   {
+      ObjectCreate(0, bg, OBJ_RECTANGLE_LABEL, 0, 0, 0);
+      ObjectSetInteger(0, bg, OBJPROP_CORNER, CORNER_RIGHT_LOWER);
+      ObjectSetInteger(0, bg, OBJPROP_XDISTANCE, px);
+      ObjectSetInteger(0, bg, OBJPROP_YDISTANCE, py);
+      ObjectSetInteger(0, bg, OBJPROP_XSIZE, pw);
+      ObjectSetInteger(0, bg, OBJPROP_YSIZE, ph);
+      ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'20,22,38');
+      ObjectSetInteger(0, bg, OBJPROP_BORDER_COLOR, C'50,65,110');
+      ObjectSetInteger(0, bg, OBJPROP_BORDER_TYPE, BORDER_FLAT);
+      ObjectSetInteger(0, bg, OBJPROP_BACK, false);
+      ObjectSetInteger(0, bg, OBJPROP_SELECTABLE, false);
+   }
+
+   string tt = g_prefix + "TrendTitle";
+   if(ObjectFind(0, tt) < 0)
+   {
+      ObjectCreate(0, tt, OBJ_LABEL, 0, 0, 0);
+      ObjectSetInteger(0, tt, OBJPROP_CORNER, CORNER_RIGHT_LOWER);
+      ObjectSetInteger(0, tt, OBJPROP_XDISTANCE, px + 22);
+      ObjectSetInteger(0, tt, OBJPROP_YDISTANCE, py - 8);
+      ObjectSetString(0, tt, OBJPROP_TEXT, "TREND STATUS");
+      ObjectSetString(0, tt, OBJPROP_FONT, "Arial Bold");
+      ObjectSetInteger(0, tt, OBJPROP_FONTSIZE, 10);
+      ObjectSetInteger(0, tt, OBJPROP_COLOR, C'160,170,200');
+      ObjectSetInteger(0, tt, OBJPROP_BACK, false);
+      ObjectSetInteger(0, tt, OBJPROP_SELECTABLE, false);
+   }
+
+   // 4 rows: TF name + status
+   int rowY[4] = {py - 38, py - 68, py - 98, py - 128};
+   for(int i = 0; i < 4; i++)
+   {
+      string tfLbl = g_prefix + "TrTF" + IntegerToString(i);
+      if(ObjectFind(0, tfLbl) < 0)
+      {
+         ObjectCreate(0, tfLbl, OBJ_LABEL, 0, 0, 0);
+         ObjectSetInteger(0, tfLbl, OBJPROP_CORNER, CORNER_RIGHT_LOWER);
+         ObjectSetInteger(0, tfLbl, OBJPROP_XDISTANCE, px + pw - 20);
+         ObjectSetInteger(0, tfLbl, OBJPROP_YDISTANCE, rowY[i]);
+         ObjectSetString(0, tfLbl, OBJPROP_TEXT, g_trendTFName[i]);
+         ObjectSetString(0, tfLbl, OBJPROP_FONT, "Arial Bold");
+         ObjectSetInteger(0, tfLbl, OBJPROP_FONTSIZE, 11);
+         ObjectSetInteger(0, tfLbl, OBJPROP_COLOR, C'190,200,220');
+         ObjectSetInteger(0, tfLbl, OBJPROP_BACK, false);
+         ObjectSetInteger(0, tfLbl, OBJPROP_SELECTABLE, false);
+      }
+
+      string stLbl = g_prefix + "TrSt" + IntegerToString(i);
+      if(ObjectFind(0, stLbl) < 0)
+      {
+         ObjectCreate(0, stLbl, OBJ_LABEL, 0, 0, 0);
+         ObjectSetInteger(0, stLbl, OBJPROP_CORNER, CORNER_RIGHT_LOWER);
+         ObjectSetInteger(0, stLbl, OBJPROP_XDISTANCE, px + 18);
+         ObjectSetInteger(0, stLbl, OBJPROP_YDISTANCE, rowY[i]);
+         ObjectSetString(0, stLbl, OBJPROP_TEXT, "---");
+         ObjectSetString(0, stLbl, OBJPROP_FONT, "Arial Bold");
+         ObjectSetInteger(0, stLbl, OBJPROP_FONTSIZE, 11);
+         ObjectSetInteger(0, stLbl, OBJPROP_COLOR, C'100,100,115');
+         ObjectSetInteger(0, stLbl, OBJPROP_BACK, false);
+         ObjectSetInteger(0, stLbl, OBJPROP_SELECTABLE, false);
+      }
+   }
+}
+
+void UpdateTrendPanel()
+{
+   for(int i = 0; i < 4; i++)
+   {
+      double ema20[6], ema50[6], atrVal[1], closeVal[1];
+      int copied20 = CopyBuffer(g_hTrendEMA20[i], 0, 0, 6, ema20);
+      int copied50 = CopyBuffer(g_hTrendEMA50[i], 0, 0, 6, ema50);
+      int copiedATR = CopyBuffer(g_hTrendATR[i], 0, 0, 1, atrVal);
+      int copiedC = CopyClose(_Symbol, g_trendTF[i], 0, 1, closeVal);
+
+      string stLbl = g_prefix + "TrSt" + IntegerToString(i);
+      if(ObjectFind(0, stLbl) < 0) continue;
+
+      if(copied20 < 6 || copied50 < 6 || copiedATR < 1 || copiedC < 1)
+      {
+         ObjectSetString(0, stLbl, OBJPROP_TEXT, "---");
+         ObjectSetInteger(0, stLbl, OBJPROP_COLOR, C'100,100,115');
+         continue;
+      }
+
+      // EMA20 vs EMA50 position
+      bool ema20Above = (ema20[5] > ema50[5]);
+      double price = closeVal[0];
+      bool priceAboveEMA20 = (price > ema20[5]);
+      bool priceBelowEMA20 = (price < ema20[5]);
+
+      // EMA20 slope (linear regression over 5 bars)
+      double sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+      for(int j = 0; j < 5; j++)
+      {
+         sumX  += j;
+         sumY  += ema20[j+1];
+         sumXY += j * ema20[j+1];
+         sumX2 += j * j;
+      }
+      double emaSlope = (5.0 * sumXY - sumX * sumY) / (5.0 * sumX2 - sumX * sumX);
+
+      // Normalize slope by ATR
+      double normSlope = (atrVal[0] > 0) ? emaSlope / atrVal[0] : 0;
+
+      // 5-level trend determination
+      string statusTxt;
+      color statusClr;
+
+      if(ema20Above && priceAboveEMA20 && normSlope > 0.15)
+      {
+         statusTxt = "STRONG UP";
+         statusClr = C'0,220,100';
+      }
+      else if(ema20Above && normSlope > 0.02)
+      {
+         statusTxt = "UP";
+         statusClr = C'80,200,120';
+      }
+      else if(!ema20Above && priceBelowEMA20 && normSlope < -0.15)
+      {
+         statusTxt = "STRONG DN";
+         statusClr = C'255,60,60';
+      }
+      else if(!ema20Above && normSlope < -0.02)
+      {
+         statusTxt = "DOWN";
+         statusClr = C'220,90,90';
+      }
+      else
+      {
+         statusTxt = "RANGE";
+         statusClr = C'140,140,155';
+      }
+
+      ObjectSetString(0, stLbl, OBJPROP_TEXT, statusTxt);
+      ObjectSetInteger(0, stLbl, OBJPROP_COLOR, statusClr);
    }
 }
 
@@ -566,7 +942,7 @@ void ProcessHTF(int tfIdx, int lb,
                 bool fullRecalc, double &barTrend[])
 {
    ENUM_TIMEFRAMES period = g_mtfTF[tfIdx];
-   int need = 3000;
+   int need = 5000;
 
    double htfH[], htfL[], htfC[];
    datetime htfT[];
@@ -624,6 +1000,9 @@ void ProcessHTF(int tfIdx, int lb,
       // Find latest HTF bar that CLOSED by chart bar's close time
       datetime chartClose = chartTime[i] + (datetime)chartPeriod;
       datetime cutoff = chartClose - (datetime)htfPeriod;
+      // Real-time bar safety: on the last bar, subtract 1 to avoid referencing unclosed HTF bar
+      if(i == chartTotal - 1 && chartPeriod <= htfPeriod)
+         cutoff -= 1;
       int htfIdx = FindChartBar(htfT, cnt, cutoff);
 
       // Update swing levels for all new HTF bars since last chart bar
@@ -777,6 +1156,7 @@ int OnCalculate(const int rates_total,
          CreateUI();
          CreateWatermark();
          CreateMSSPanel();
+         CreateTrendPanel();
       }
 
       // Resize per-bar trend arrays
@@ -902,13 +1282,16 @@ int OnCalculate(const int rates_total,
       }
       g_masterTrend = prevMaster;
 
-      // Update MSS Alignment Panel
+      // Update MSS Score Panel + Trend Status Panel
       if(rates_total > 0)
       {
          int lastIdx = rates_total - 1;
          UpdateMSSPanel((int)g_barTrend0[lastIdx],
                         (int)g_barTrend1[lastIdx],
-                        (int)g_barTrend2[lastIdx]);
+                        (int)g_barTrend2[lastIdx],
+                        close, open, high, low, tick_volume,
+                        lastIdx, rates_total);
+         UpdateTrendPanel();
       }
 
       //=== Phase 4: Key Levels ===
@@ -957,6 +1340,7 @@ void OnChartEvent(const int id, const long &lparam,
    {
       CreateWatermark();
       CreateMSSPanel();
+      CreateTrendPanel();
       return;
    }
 
