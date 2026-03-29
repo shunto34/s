@@ -295,36 +295,23 @@ void CreateUI()
 }
 
 //+------------------------------------------------------------------+
-void SetMSSPanelVisible(bool visible)
+void DeleteMSSPanelObjects()
 {
    string names[] = {"MSSBg","MSSTitle","MSSScore","MSSDir",
                      "MSSTF0","MSSTF1","MSSTF2",
                      "MSSArr0","MSSArr1","MSSArr2"};
    for(int i = 0; i < ArraySize(names); i++)
-   {
-      string nm = g_prefix + names[i];
-      if(ObjectFind(0, nm) >= 0)
-         ObjectSetInteger(0, nm, OBJPROP_TIMEFRAMES, visible ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS);
-   }
+      ObjectDelete(0, g_prefix + names[i]);
 }
 
-void SetTrendPanelVisible(bool visible)
+void DeleteTrendPanelObjects()
 {
-   string nm;
-   nm = g_prefix + "TrendBg";
-   if(ObjectFind(0, nm) >= 0)
-      ObjectSetInteger(0, nm, OBJPROP_TIMEFRAMES, visible ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS);
-   nm = g_prefix + "TrendTitle";
-   if(ObjectFind(0, nm) >= 0)
-      ObjectSetInteger(0, nm, OBJPROP_TIMEFRAMES, visible ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS);
+   ObjectDelete(0, g_prefix + "TrendBg");
+   ObjectDelete(0, g_prefix + "TrendTitle");
    for(int i = 0; i < 4; i++)
    {
-      nm = g_prefix + "TrTF" + IntegerToString(i);
-      if(ObjectFind(0, nm) >= 0)
-         ObjectSetInteger(0, nm, OBJPROP_TIMEFRAMES, visible ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS);
-      nm = g_prefix + "TrSt" + IntegerToString(i);
-      if(ObjectFind(0, nm) >= 0)
-         ObjectSetInteger(0, nm, OBJPROP_TIMEFRAMES, visible ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS);
+      ObjectDelete(0, g_prefix + "TrTF" + IntegerToString(i));
+      ObjectDelete(0, g_prefix + "TrSt" + IntegerToString(i));
    }
 }
 
@@ -370,6 +357,7 @@ void CreateWatermark()
 //+------------------------------------------------------------------+
 void CreateMSSPanel()
 {
+   if(!g_showMSS) return;
    int px = 10, py = 260, pw = 165, ph = 175;
 
    string bg = g_prefix + "MSSBg";
@@ -671,6 +659,7 @@ void UpdateMSSPanel(int trend0, int trend1, int trend2,
                     const double &close[], const double &open[], const double &high[],
                     const double &low[], const long &tickVol[], int idx, int total)
 {
+   if(!g_showMSS) return;
    int trends[3];
    trends[0] = trend0; trends[1] = trend1; trends[2] = trend2;
 
@@ -756,6 +745,7 @@ void UpdateMSSPanel(int trend0, int trend1, int trend2,
 //+------------------------------------------------------------------+
 void CreateTrendPanel()
 {
+   if(!g_showTrend) return;
    // Use LEFT_LOWER corner to avoid anchor issues with right-side positioning
    // Place at the right side of chart using left-lower reference
    int chartW = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
@@ -824,6 +814,7 @@ void CreateTrendPanel()
 
 void UpdateTrendPanel()
 {
+   if(!g_showTrend) return;
    for(int i = 0; i < 4; i++)
    {
       double ema20[6], ema50[6], atrVal[1], closeVal[1];
@@ -1273,6 +1264,7 @@ int OnCalculate(const int rates_total,
          CreateWatermark();
          CreateMSSPanel();
          CreateTrendPanel();
+         CreateToggleButtons();
       }
 
       // Resize per-bar trend arrays
@@ -1458,8 +1450,6 @@ void OnChartEvent(const int id, const long &lparam,
       CreateMSSPanel();
       CreateTrendPanel();
       CreateToggleButtons();
-      if(!g_showMSS)   SetMSSPanelVisible(false);
-      if(!g_showTrend)  SetTrendPanelVisible(false);
       return;
    }
 
@@ -1469,9 +1459,9 @@ void OnChartEvent(const int id, const long &lparam,
    if(sparam == g_prefix+"TogMSS")
    {
       g_showMSS = !g_showMSS;
-      SetMSSPanelVisible(g_showMSS);
-      ObjectSetInteger(0, sparam, OBJPROP_BGCOLOR, g_showMSS ? C'30,32,48' : C'60,30,30');
-      ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
+      if(!g_showMSS) DeleteMSSPanelObjects();
+      else           CreateMSSPanel();
+      CreateToggleButtons();
       ChartRedraw();
       return;
    }
@@ -1480,9 +1470,9 @@ void OnChartEvent(const int id, const long &lparam,
    if(sparam == g_prefix+"TogTrend")
    {
       g_showTrend = !g_showTrend;
-      SetTrendPanelVisible(g_showTrend);
-      ObjectSetInteger(0, sparam, OBJPROP_BGCOLOR, g_showTrend ? C'30,32,48' : C'60,30,30');
-      ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
+      if(!g_showTrend) DeleteTrendPanelObjects();
+      else             CreateTrendPanel();
+      CreateToggleButtons();
       ChartRedraw();
       return;
    }
