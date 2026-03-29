@@ -432,14 +432,67 @@ int CalcMSSScore(int t0, int t1, int t2,
    int dir = isBull ? 1 : -1;
    double score = 0.0;
 
-   // === A. MTF Alignment (max 35pt) ===
+   // === MARKET REGIME DETECTION (adaptive weights) ===
+   // ATR coefficient of variation: low = trending, high = ranging/volatile
+   double regimeBoostAlign = 0.0, regimeBoostEMA = 0.0, regimeBoostBreakout = 0.0;
+   if(idx >= 20 && idx < total)
+   {
+      double atrArr[1];
+      if(CopyBuffer(g_hChartATR, 0, total - 1 - idx, 1, atrArr) == 1 && atrArr[0] > 0)
+      {
+         // Calculate ATR mean and variance over 20 bars
+         double atrSum = 0, atrSqSum = 0;
+         int atrCopied = 0;
+         for(int ab = 0; ab < 20; ab++)
+         {
+            double atrB[1];
+            if(CopyBuffer(g_hChartATR, 0, total - 1 - idx + ab, 1, atrB) == 1)
+            {
+               atrSum += atrB[0];
+               atrSqSum += atrB[0] * atrB[0];
+               atrCopied++;
+            }
+         }
+         if(atrCopied > 1)
+         {
+            double atrMean = atrSum / atrCopied;
+            double atrVar = (atrSqSum / atrCopied) - (atrMean * atrMean);
+            double atrStd = (atrVar > 0) ? MathSqrt(atrVar) : 0;
+            double atrCV = (atrMean > 0) ? atrStd / atrMean : 0;
+
+            bool isTrending = (atrCV < 0.25);       // Stable ATR = trending
+            bool isBreakout = (atrArr[0] > atrMean * 1.5); // ATR spike = breakout
+
+            // Adaptive weight adjustments (±5pt shift)
+            if(isTrending)
+            {
+               regimeBoostAlign = 5.0;  // Trending: trust MTF alignment more
+               regimeBoostEMA = 3.0;    // Trending: EMA structure more reliable
+            }
+            if(isBreakout)
+            {
+               regimeBoostBreakout = 5.0; // Breakout: key level break matters more
+            }
+            if(!isTrending && !isBreakout)
+            {
+               regimeBoostAlign = -3.0;   // Ranging: MTF alignment less reliable
+               regimeBoostBreakout = 3.0;  // Ranging: breakout more important
+            }
+         }
+      }
+   }
+
+   // === A. MTF Alignment (base 35pt + regime adjust) ===
+   double alignMax = 35.0 + regimeBoostAlign;
    if(t0 == dir) score += 10.0;
    if(t1 == dir) score += 12.0;
    if(t2 == dir) score += 13.0;
    if(t0 == dir && t1 == dir && t2 == dir) score += 8.0;
-   if(score > 35.0) score = 35.0;
+   if(score > alignMax) score = alignMax;
 
-   // === B. EMA Structure (max 25pt) ===
+   // === B. EMA Structure (base 25pt + regime adjust) ===
+   double emaMax = 25.0 + regimeBoostEMA;
+   double emaScore = 0.0;
    if(idx >= 0 && idx < total)
    {
       bool perfOrder;
@@ -451,7 +504,7 @@ int CalcMSSScore(int t0, int t1, int t2,
          perfOrder = g_ed0[idx]<g_ed1[idx] && g_ed1[idx]<g_ed2[idx] && g_ed2[idx]<g_ed3[idx]
                   && g_ed3[idx]<g_ed4[idx] && g_ed4[idx]<g_ed5[idx] && g_ed5[idx]<g_ed6[idx]
                   && g_ed6[idx]<g_ed7[idx];
-      if(perfOrder) score += 12.0;
+      if(perfOrder) emaScore += 12.0;
 
       // Ribbon squeeze expansion
       double curWidth = MathAbs(g_ed0[idx] - g_ed7[idx]);
@@ -459,7 +512,7 @@ int CalcMSSScore(int t0, int t1, int t2,
       int sqLook = MathMin(10, idx);
       for(int j = idx - sqLook; j < idx; j++)
          minW = MathMin(minW, MathAbs(g_ed0[j] - g_ed7[j]));
-      if(curWidth > 0 && minW < curWidth * 0.5) score += 8.0;
+      if(curWidth > 0 && minW < curWidth * 0.5) emaScore += 8.0;
 
       // EMA slope acceleration
       if(idx >= 5)
@@ -468,9 +521,11 @@ int CalcMSSScore(int t0, int t1, int t2,
          int backIdx = (idx - 6 >= 0) ? idx - 6 : 0;
          double slope2 = g_ed0[idx - 3] - g_ed0[backIdx];
          bool accel = isBull ? (slope1 > slope2 && slope1 > 0) : (slope1 < slope2 && slope1 < 0);
-         if(accel) score += 5.0;
+         if(accel) emaScore += 5.0;
       }
    }
+   if(emaScore > emaMax) emaScore = emaMax;
+   score += emaScore;
 
    // === C. Volume Confirmation (max 15pt) ===
    if(idx >= 20 && idx < total)
@@ -534,7 +589,9 @@ int CalcMSSScore(int t0, int t1, int t2,
       }
    }
 
-   // === E. Key Level Breakout (max 10pt) ===
+   // === E. Key Level Breakout (base 10pt + regime adjust) ===
+   double breakMax = 10.0 + regimeBoostBreakout;
+   double breakScore = 0.0;
    if(idx >= 20 && idx < total)
    {
       double hh = high[idx], ll = low[idx];
@@ -543,8 +600,8 @@ int CalcMSSScore(int t0, int t1, int t2,
          if(high[j] > hh) hh = high[j];
          if(low[j] < ll) ll = low[j];
       }
-      if(isBull && close[idx] >= hh) score += 5.0;
-      if(!isBull && close[idx] <= ll) score += 5.0;
+      if(isBull && close[idx] >= hh) breakScore += 5.0;
+      if(!isBull && close[idx] <= ll) breakScore += 5.0;
 
       // No pullback (momentum sustained)
       if(idx >= 3)
@@ -555,9 +612,11 @@ int CalcMSSScore(int t0, int t1, int t2,
             if(isBull && close[j] < open[j]) { sustained = false; break; }
             if(!isBull && close[j] > open[j]) { sustained = false; break; }
          }
-         if(sustained) score += 5.0;
+         if(sustained) breakScore += 5.0;
       }
    }
+   if(breakScore > breakMax) breakScore = breakMax;
+   score += breakScore;
 
    int finalScore = (int)MathMin(100.0, MathMax(0.0, score));
    return(finalScore);
