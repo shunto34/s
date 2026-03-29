@@ -264,6 +264,7 @@ void OnDeinit(const int reason)
 void MakeButtonCorner(string name, string text, int x, int y, int w, int h,
                       ENUM_BASE_CORNER corner)
 {
+   ObjectDelete(0, name);
    ObjectCreate(0, name, OBJ_BUTTON, 0, 0, 0);
    ObjectSetInteger(0, name, OBJPROP_CORNER, corner);
    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
@@ -329,18 +330,18 @@ void SetTrendPanelVisible(bool visible)
 
 void CreateToggleButtons()
 {
-   // MSS toggle button (left-bottom, above the MSS panel)
-   MakeButtonCorner(g_prefix+"TogMSS", "MSS", 10, 270, 42, 20, CORNER_LEFT_LOWER);
-   ObjectSetInteger(0, g_prefix+"TogMSS", OBJPROP_FONTSIZE, 8);
-   ObjectSetInteger(0, g_prefix+"TogMSS", OBJPROP_BGCOLOR, g_showMSS ? C'30,32,48' : C'60,30,30');
+   // Place toggle buttons in the top bar, right after TF buttons (M1..D1)
+   // TF buttons: x=10, w=42, gap=2, 6 buttons → ends at 10 + 6*(42+2) = 274
+   int x0 = 280, y = 50, w = 42, h = 24;
+
+   // MSS panel toggle
+   MakeButtonCorner(g_prefix+"TogMSS", g_showMSS ? "MSS" : "mss", x0, y, w, h, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, g_prefix+"TogMSS", OBJPROP_BGCOLOR, g_showMSS ? C'25,80,60' : C'80,30,30');
    ObjectSetInteger(0, g_prefix+"TogMSS", OBJPROP_STATE, false);
 
-   // Trend toggle button (right-bottom, above the Trend panel)
-   int chartW = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
-   int trendPx = chartW - 175 - 80;
-   MakeButtonCorner(g_prefix+"TogTrend", "TRD", trendPx, 270, 42, 20, CORNER_LEFT_LOWER);
-   ObjectSetInteger(0, g_prefix+"TogTrend", OBJPROP_FONTSIZE, 8);
-   ObjectSetInteger(0, g_prefix+"TogTrend", OBJPROP_BGCOLOR, g_showTrend ? C'30,32,48' : C'60,30,30');
+   // Trend panel toggle
+   MakeButtonCorner(g_prefix+"TogTrend", g_showTrend ? "TRD" : "trd", x0 + (w+2), y, w, h, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, g_prefix+"TogTrend", OBJPROP_BGCOLOR, g_showTrend ? C'25,80,60' : C'80,30,30');
    ObjectSetInteger(0, g_prefix+"TogTrend", OBJPROP_STATE, false);
 }
 
