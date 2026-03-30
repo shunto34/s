@@ -209,9 +209,10 @@ int IsLicenseValid()
    MqlDateTime dt;
    TimeCurrent(dt);
    if(k == GenMK(dt.year, dt.mon)) return(1);
-   int pm = dt.mon - 1, py = dt.year;
-   if(pm < 1) { pm = 12; py--; }
-   if(k == GenMK(py, pm)) return(1);
+   if(dt.day == 1)
+   {  int pm = dt.mon - 1, py = dt.year;
+      if(pm < 1) { pm = 12; py--; }
+      if(k == GenMK(py, pm)) return(1); }
    return(0);
 }
 

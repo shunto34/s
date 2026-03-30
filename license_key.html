@@ -99,7 +99,7 @@ function render() {
   let pm = viewMonth - 1, py = viewYear;
   if (pm < 1) { pm = 12; py--; }
   document.getElementById('graceBox').innerHTML =
-    'Previous month key (grace): <span>' + genKey(py, pm) + '</span>';
+    'Previous month key (1st only): <span>' + genKey(py, pm) + '</span>';
 }
 
 function move(d) {
