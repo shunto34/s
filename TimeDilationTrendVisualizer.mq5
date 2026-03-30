@@ -6,7 +6,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Time Dilation Trend Visualizer [EZPZ]"
 #property link      ""
-#property version   "4.31"
+#property version   "4.32"
 #property indicator_chart_window
 
 #property indicator_buffers 21
@@ -146,7 +146,9 @@ string g_hiNames[];
 string g_loNames[];
 
 //--- Push notification duplicate prevention
-datetime g_lastNotifyTime = 0;
+datetime g_lastNotifyTime    = 0;
+datetime g_lastExitNotify    = 0;
+datetime g_lastMSSNotify     = 0;
 
 //--- Trend Status Panel handles (M5/M15/H1/H4)
 ENUM_TIMEFRAMES g_trendTF[4];
@@ -1047,6 +1049,13 @@ void UpdateTrendPanel()
 }
 
 //+------------------------------------------------------------------+
+bool IsPushTF()
+{
+   ENUM_TIMEFRAMES p = Period();
+   return(p == PERIOD_M15 || p == PERIOD_H1);
+}
+
+//+------------------------------------------------------------------+
 void SendSignalAlert(string direction, double price)
 {
    string tf = EnumToString(Period());
@@ -1058,7 +1067,7 @@ void SendSignalAlert(string direction, double price)
    if(InpAlertSound)
       PlaySound("alert.wav");
    Alert(msg);
-   if(InpPushNotify)
+   if(InpPushNotify && IsPushTF())
       SendNotification(msg);
    Print("TDTV Alert: ", msg);
 }
@@ -1356,6 +1365,29 @@ void ProcessHTF(int tfIdx, int lb,
                CreateBOSLabel("MBe" + tfName + timeSuffix,
                   chartTime[i], chartHigh[i],
                   "M", C'255,80,150', true);
+
+            // MSS/BOS push notification (latest bars only, M15/H1)
+            if(!fullRecalc && i >= chartTotal - 1 && chartTime[i] > g_lastMSSNotify)
+            {
+               string mssType = "";
+               if(mBu)      mssType = "MSS Bull";
+               else if(mBe) mssType = "MSS Bear";
+               else if(bBu) mssType = "BOS Bull";
+               else if(bBe) mssType = "BOS Bear";
+
+               if(mssType != "")
+               {
+                  g_lastMSSNotify = chartTime[i];
+                  string tfStr2 = EnumToString(Period());
+                  StringReplace(tfStr2, "PERIOD_", "");
+                  string mssMsg = StringFormat("[%s] %s %s | %s",
+                     _Symbol, mssType, tfName, tfStr2);
+                  Alert(mssMsg);
+                  if(InpPushNotify && IsPushTF())
+                     SendNotification(mssMsg);
+                  Print("TDTV MSS: ", mssMsg);
+               }
+            }
          }
       }
    }
@@ -1628,6 +1660,22 @@ int OnCalculate(const int rates_total,
                      time[i], low[i], exitC, false, eSz);
                   CreateSignalLabel("SigExit" + IntegerToString(i),
                      time[i], low[i], eTxt, exitC, false, eTxtSz);
+               }
+
+               // EXIT push notification (latest bar only, M15/H1)
+               if(i == rates_total - 1 && prev_calculated > 0 && time[i] > g_lastExitNotify)
+               {
+                  g_lastExitNotify = time[i];
+                  string tfStr = EnumToString(Period());
+                  StringReplace(tfStr, "PERIOD_", "");
+                  string exitMsg = StringFormat("[%s] %s %s @ %s | %s",
+                     _Symbol, eTxt, isBullPos ? "LONG TP" : "SHORT TP",
+                     DoubleToString(close[i], _Digits), tfStr);
+                  if(InpAlertSound) PlaySound("alert.wav");
+                  Alert(exitMsg);
+                  if(InpPushNotify && IsPushTF())
+                     SendNotification(exitMsg);
+                  Print("TDTV EXIT: ", exitMsg);
                }
             }
          }
