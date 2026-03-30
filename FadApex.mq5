@@ -6,7 +6,7 @@
 //+------------------------------------------------------------------+
 #property copyright "FAD APEX"
 #property link      ""
-#property version   "4.33"
+#property version   "4.40"
 #property indicator_chart_window
 
 #property indicator_buffers 21
@@ -303,7 +303,8 @@ void CreateUI()
 //+------------------------------------------------------------------+
 void DeleteMSSPanelObjects()
 {
-   string names[] = {"MSSBg","MSSTitle","MSSScore","MSSDir",
+   string names[] = {"MSSBg","MSSTitle","MSSScore","MSSDir","MSSSfx",
+                     "MSSBarBg","MSSBarFill","MSSLevel","MSSTFHdr",
                      "MSSTF0","MSSTF1","MSSTF2",
                      "MSSArr0","MSSArr1","MSSArr2"};
    for(int i = 0; i < ArraySize(names); i++)
@@ -378,11 +379,28 @@ void CreateWatermark()
 }
 
 //+------------------------------------------------------------------+
+void MakePanelLabel(string name, int x, int y, string text, string font,
+                    int fontSize, color clr, ENUM_BASE_CORNER corner=CORNER_LEFT_LOWER)
+{
+   ObjectDelete(0, name);
+   ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, name, OBJPROP_CORNER, corner);
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
+   ObjectSetString(0, name, OBJPROP_TEXT, text);
+   ObjectSetString(0, name, OBJPROP_FONT, font);
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, fontSize);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
+   ObjectSetInteger(0, name, OBJPROP_BACK, false);
+   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+}
+
 void CreateMSSPanel()
 {
    if(!g_showMSS) return;
-   int px = 10, py = 260, pw = 165, ph = 175;
+   int px = 10, py = 280, pw = 170, ph = 210;
 
+   // Background
    string bg = g_prefix + "MSSBg";
    ObjectDelete(0, bg);
    ObjectCreate(0, bg, OBJ_RECTANGLE_LABEL, 0, 0, 0);
@@ -391,83 +409,79 @@ void CreateMSSPanel()
    ObjectSetInteger(0, bg, OBJPROP_YDISTANCE, py);
    ObjectSetInteger(0, bg, OBJPROP_XSIZE, pw);
    ObjectSetInteger(0, bg, OBJPROP_YSIZE, ph);
-   ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'20,22,38');
-   ObjectSetInteger(0, bg, OBJPROP_BORDER_COLOR, C'50,65,110');
+   ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'16,18,32');
+   ObjectSetInteger(0, bg, OBJPROP_BORDER_COLOR, C'45,55,100');
    ObjectSetInteger(0, bg, OBJPROP_BORDER_TYPE, BORDER_FLAT);
    ObjectSetInteger(0, bg, OBJPROP_BACK, false);
    ObjectSetInteger(0, bg, OBJPROP_SELECTABLE, false);
 
-   // Title
-   string tt = g_prefix + "MSSTitle";
-   ObjectDelete(0, tt);
-   ObjectCreate(0, tt, OBJ_LABEL, 0, 0, 0);
-   ObjectSetInteger(0, tt, OBJPROP_CORNER, CORNER_LEFT_LOWER);
-   ObjectSetInteger(0, tt, OBJPROP_XDISTANCE, px + 22);
-   ObjectSetInteger(0, tt, OBJPROP_YDISTANCE, py - 8);
-   ObjectSetString(0, tt, OBJPROP_TEXT, "MSS SCORE");
-   ObjectSetString(0, tt, OBJPROP_FONT, "Arial Bold");
-   ObjectSetInteger(0, tt, OBJPROP_FONTSIZE, 11);
-   ObjectSetInteger(0, tt, OBJPROP_COLOR, C'160,170,200');
-   ObjectSetInteger(0, tt, OBJPROP_BACK, false);
-   ObjectSetInteger(0, tt, OBJPROP_SELECTABLE, false);
+   // Row 1: Title — "CONFIDENCE"
+   MakePanelLabel(g_prefix+"MSSTitle", px+28, py-6, "CONFIDENCE", "Arial Bold", 10, C'130,140,170');
 
-   // Score value (big number)
-   string sv = g_prefix + "MSSScore";
-   ObjectDelete(0, sv);
-   ObjectCreate(0, sv, OBJ_LABEL, 0, 0, 0);
-   ObjectSetInteger(0, sv, OBJPROP_CORNER, CORNER_LEFT_LOWER);
-   ObjectSetInteger(0, sv, OBJPROP_XDISTANCE, px + 45);
-   ObjectSetInteger(0, sv, OBJPROP_YDISTANCE, py - 42);
-   ObjectSetString(0, sv, OBJPROP_TEXT, "---");
-   ObjectSetString(0, sv, OBJPROP_FONT, "Arial Bold");
-   ObjectSetInteger(0, sv, OBJPROP_FONTSIZE, 28);
-   ObjectSetInteger(0, sv, OBJPROP_COLOR, C'100,100,115');
-   ObjectSetInteger(0, sv, OBJPROP_BACK, false);
-   ObjectSetInteger(0, sv, OBJPROP_SELECTABLE, false);
+   // Row 2: Direction label — ">> BULLISH" etc
+   MakePanelLabel(g_prefix+"MSSDir", px+10, py-28, "---", "Arial Bold", 12, C'100,100,115');
 
-   // Direction label
-   string dl = g_prefix + "MSSDir";
-   ObjectDelete(0, dl);
-   ObjectCreate(0, dl, OBJ_LABEL, 0, 0, 0);
-   ObjectSetInteger(0, dl, OBJPROP_CORNER, CORNER_LEFT_LOWER);
-   ObjectSetInteger(0, dl, OBJPROP_XDISTANCE, px + 30);
-   ObjectSetInteger(0, dl, OBJPROP_YDISTANCE, py - 82);
-   ObjectSetString(0, dl, OBJPROP_TEXT, "---");
-   ObjectSetString(0, dl, OBJPROP_FONT, "Arial Bold");
-   ObjectSetInteger(0, dl, OBJPROP_FONTSIZE, 11);
-   ObjectSetInteger(0, dl, OBJPROP_COLOR, C'100,100,115');
-   ObjectSetInteger(0, dl, OBJPROP_BACK, false);
-   ObjectSetInteger(0, dl, OBJPROP_SELECTABLE, false);
+   // Row 3: Score number (large)
+   MakePanelLabel(g_prefix+"MSSScore", px+10, py-52, "---", "Arial Bold", 32, C'100,100,115');
 
-   // TF dots row (M5 M15 H1)
+   // Row 3 right: Score suffix "/100"
+   MakePanelLabel(g_prefix+"MSSSfx", px+100, py-52, "/100", "Arial", 11, C'70,75,95');
+
+   // Row 4: Confidence bar background
+   string barBg = g_prefix + "MSSBarBg";
+   ObjectDelete(0, barBg);
+   ObjectCreate(0, barBg, OBJ_RECTANGLE_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, barBg, OBJPROP_CORNER, CORNER_LEFT_LOWER);
+   ObjectSetInteger(0, barBg, OBJPROP_XDISTANCE, px + 10);
+   ObjectSetInteger(0, barBg, OBJPROP_YDISTANCE, py - 100);
+   ObjectSetInteger(0, barBg, OBJPROP_XSIZE, pw - 20);
+   ObjectSetInteger(0, barBg, OBJPROP_YSIZE, 8);
+   ObjectSetInteger(0, barBg, OBJPROP_BGCOLOR, C'35,38,55');
+   ObjectSetInteger(0, barBg, OBJPROP_BORDER_COLOR, C'35,38,55');
+   ObjectSetInteger(0, barBg, OBJPROP_BORDER_TYPE, BORDER_FLAT);
+   ObjectSetInteger(0, barBg, OBJPROP_BACK, false);
+   ObjectSetInteger(0, barBg, OBJPROP_SELECTABLE, false);
+
+   // Row 4: Confidence bar fill
+   string barFill = g_prefix + "MSSBarFill";
+   ObjectDelete(0, barFill);
+   ObjectCreate(0, barFill, OBJ_RECTANGLE_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, barFill, OBJPROP_CORNER, CORNER_LEFT_LOWER);
+   ObjectSetInteger(0, barFill, OBJPROP_XDISTANCE, px + 10);
+   ObjectSetInteger(0, barFill, OBJPROP_YDISTANCE, py - 100);
+   ObjectSetInteger(0, barFill, OBJPROP_XSIZE, 1);
+   ObjectSetInteger(0, barFill, OBJPROP_YSIZE, 8);
+   ObjectSetInteger(0, barFill, OBJPROP_BGCOLOR, C'100,100,115');
+   ObjectSetInteger(0, barFill, OBJPROP_BORDER_COLOR, C'100,100,115');
+   ObjectSetInteger(0, barFill, OBJPROP_BORDER_TYPE, BORDER_FLAT);
+   ObjectSetInteger(0, barFill, OBJPROP_BACK, false);
+   ObjectSetInteger(0, barFill, OBJPROP_SELECTABLE, false);
+
+   // Row 5: Confidence level text — "HIGH / ENTRY OK" etc
+   MakePanelLabel(g_prefix+"MSSLevel", px+10, py-115, "---", "Arial Bold", 10, C'100,100,115');
+
+   // Row 6: TF alignment header
+   MakePanelLabel(g_prefix+"MSSTFHdr", px+10, py-140, "MTF ALIGN", "Arial", 8, C'80,85,110');
+
+   // Row 7: TF labels + arrows
    string tfLabels[3] = {"M5", "M15", "H1"};
-   int dotX[3] = {px + 12, px + 60, px + 115};
-   int dotY = py - 110;
+   int dotX[3] = {px + 10, px + 60, px + 115};
+   int dotY = py - 158;
 
    for(int i = 0; i < 3; i++)
    {
-      string tfLbl = g_prefix + "MSSTF" + IntegerToString(i);
-      ObjectDelete(0, tfLbl);
-      ObjectCreate(0, tfLbl, OBJ_LABEL, 0, 0, 0);
-      ObjectSetInteger(0, tfLbl, OBJPROP_CORNER, CORNER_LEFT_LOWER);
-      ObjectSetInteger(0, tfLbl, OBJPROP_XDISTANCE, dotX[i]);
-      ObjectSetInteger(0, tfLbl, OBJPROP_YDISTANCE, dotY);
-      ObjectSetString(0, tfLbl, OBJPROP_TEXT, tfLabels[i]);
-      ObjectSetString(0, tfLbl, OBJPROP_FONT, "Arial Bold");
-      ObjectSetInteger(0, tfLbl, OBJPROP_FONTSIZE, 10);
-      ObjectSetInteger(0, tfLbl, OBJPROP_COLOR, C'130,140,160');
-      ObjectSetInteger(0, tfLbl, OBJPROP_BACK, false);
-      ObjectSetInteger(0, tfLbl, OBJPROP_SELECTABLE, false);
+      MakePanelLabel(g_prefix+"MSSTF"+IntegerToString(i),
+                     dotX[i], dotY, tfLabels[i], "Arial Bold", 9, C'110,115,140');
 
       string arrLbl = g_prefix + "MSSArr" + IntegerToString(i);
       ObjectDelete(0, arrLbl);
       ObjectCreate(0, arrLbl, OBJ_LABEL, 0, 0, 0);
       ObjectSetInteger(0, arrLbl, OBJPROP_CORNER, CORNER_LEFT_LOWER);
-      ObjectSetInteger(0, arrLbl, OBJPROP_XDISTANCE, dotX[i] + 5);
-      ObjectSetInteger(0, arrLbl, OBJPROP_YDISTANCE, dotY - 22);
+      ObjectSetInteger(0, arrLbl, OBJPROP_XDISTANCE, dotX[i] + 24);
+      ObjectSetInteger(0, arrLbl, OBJPROP_YDISTANCE, dotY + 1);
       ObjectSetString(0, arrLbl, OBJPROP_TEXT, CharToString(159));
       ObjectSetString(0, arrLbl, OBJPROP_FONT, "Wingdings");
-      ObjectSetInteger(0, arrLbl, OBJPROP_FONTSIZE, 12);
+      ObjectSetInteger(0, arrLbl, OBJPROP_FONTSIZE, 11);
       ObjectSetInteger(0, arrLbl, OBJPROP_COLOR, C'100,100,115');
       ObjectSetInteger(0, arrLbl, OBJPROP_BACK, false);
       ObjectSetInteger(0, arrLbl, OBJPROP_SELECTABLE, false);
@@ -823,20 +837,31 @@ void UpdateMSSPanel(int trend0, int trend1, int trend2,
    int trends[3];
    trends[0] = trend0; trends[1] = trend1; trends[2] = trend2;
 
-   // Update TF direction dots
+   // Update TF direction arrows
    for(int i = 0; i < 3; i++)
    {
       string arrLbl = g_prefix + "MSSArr" + IntegerToString(i);
       if(ObjectFind(0, arrLbl) < 0) continue;
-      ObjectSetString(0, arrLbl, OBJPROP_TEXT, CharToString(159));
-      ObjectSetString(0, arrLbl, OBJPROP_FONT, "Wingdings");
-      ObjectSetInteger(0, arrLbl, OBJPROP_FONTSIZE, 12);
-      if(trends[i] == 1) ObjectSetInteger(0, arrLbl, OBJPROP_COLOR, C'0,230,130');
-      else if(trends[i] == -1) ObjectSetInteger(0, arrLbl, OBJPROP_COLOR, C'255,65,65');
-      else ObjectSetInteger(0, arrLbl, OBJPROP_COLOR, C'100,100,115');
+      if(trends[i] == 1)
+      {
+         ObjectSetString(0, arrLbl, OBJPROP_TEXT, CharToString(233));  // up arrow
+         ObjectSetInteger(0, arrLbl, OBJPROP_COLOR, C'0,220,120');
+      }
+      else if(trends[i] == -1)
+      {
+         ObjectSetString(0, arrLbl, OBJPROP_TEXT, CharToString(234));  // down arrow
+         ObjectSetInteger(0, arrLbl, OBJPROP_COLOR, C'255,60,60');
+      }
+      else
+      {
+         ObjectSetString(0, arrLbl, OBJPROP_TEXT, CharToString(232));  // dash
+         ObjectSetInteger(0, arrLbl, OBJPROP_COLOR, C'90,90,105');
+      }
+      ObjectSetString(0, arrLbl, OBJPROP_FONT, "Wingdings 3");
+      ObjectSetInteger(0, arrLbl, OBJPROP_FONTSIZE, 11);
    }
 
-   // Calculate AI score
+   // Calculate confidence score
    int score = CalcMSSScore(trend0, trend1, trend2, close, open, high, low, tickVol, idx, total);
 
    // Determine direction
@@ -847,58 +872,99 @@ void UpdateMSSPanel(int trend0, int trend1, int trend2,
    bool isBull = (buCnt >= beCnt);
    bool allAligned = (buCnt == 3 || beCnt == 3);
 
-   // Update score display
-   string sv = g_prefix + "MSSScore";
-   if(ObjectFind(0, sv) >= 0)
-   {
-      ObjectSetString(0, sv, OBJPROP_TEXT, IntegerToString(score));
-      // Color gradient based on score
-      color scoreClr;
-      if(score >= 80) scoreClr = isBull ? C'0,255,140' : C'255,60,60';
-      else if(score >= 60) scoreClr = C'255,210,50';
-      else if(score >= 40) scoreClr = C'160,170,190';
-      else scoreClr = C'100,100,115';
-      ObjectSetInteger(0, sv, OBJPROP_COLOR, scoreClr);
-   }
-
-   // Update direction label
+   // Direction label
    string dl = g_prefix + "MSSDir";
    if(ObjectFind(0, dl) >= 0)
    {
       string dirTxt;
       color dirClr;
-      if(allAligned && isBull) { dirTxt = ">> BULLISH"; dirClr = C'0,230,130'; }
-      else if(allAligned && !isBull) { dirTxt = "<< BEARISH"; dirClr = C'255,65,65'; }
-      else if(buCnt > beCnt) { dirTxt = "> BULL BIAS"; dirClr = C'80,190,120'; }
-      else if(beCnt > buCnt) { dirTxt = "< BEAR BIAS"; dirClr = C'210,90,90'; }
-      else { dirTxt = "- NEUTRAL"; dirClr = C'130,130,145'; }
+      if(allAligned && isBull)       { dirTxt = "BULL >>"; dirClr = C'0,230,130'; }
+      else if(allAligned && !isBull) { dirTxt = "BEAR <<"; dirClr = C'255,65,65'; }
+      else if(buCnt > beCnt)         { dirTxt = "BULL BIAS >"; dirClr = C'60,180,110'; }
+      else if(beCnt > buCnt)         { dirTxt = "BEAR BIAS <"; dirClr = C'200,80,80'; }
+      else                           { dirTxt = "NEUTRAL  -"; dirClr = C'120,120,135'; }
       ObjectSetString(0, dl, OBJPROP_TEXT, dirTxt);
-      ObjectSetString(0, dl, OBJPROP_FONT, "Arial Bold");
       ObjectSetInteger(0, dl, OBJPROP_COLOR, dirClr);
    }
 
-   // Highlight box
+   // Score number
+   color scoreClr;
+   if(score >= 75)      scoreClr = isBull ? C'0,255,140' : C'255,70,70';
+   else if(score >= 55) scoreClr = C'255,210,50';
+   else if(score >= 35) scoreClr = C'150,155,175';
+   else                 scoreClr = C'90,90,105';
+
+   string sv = g_prefix + "MSSScore";
+   if(ObjectFind(0, sv) >= 0)
+   {
+      ObjectSetString(0, sv, OBJPROP_TEXT, IntegerToString(score));
+      ObjectSetInteger(0, sv, OBJPROP_COLOR, scoreClr);
+   }
+
+   // Confidence bar fill
+   string barFill = g_prefix + "MSSBarFill";
+   if(ObjectFind(0, barFill) >= 0)
+   {
+      int barMaxW = 150;  // pw(170) - 20 padding
+      int barW = (int)(barMaxW * MathMin(100, score) / 100.0);
+      if(barW < 1) barW = 1;
+      ObjectSetInteger(0, barFill, OBJPROP_XSIZE, barW);
+      ObjectSetInteger(0, barFill, OBJPROP_BGCOLOR, scoreClr);
+      ObjectSetInteger(0, barFill, OBJPROP_BORDER_COLOR, scoreClr);
+   }
+
+   // Confidence level text — actionable guidance
+   string lvl = g_prefix + "MSSLevel";
+   if(ObjectFind(0, lvl) >= 0)
+   {
+      string lvlTxt;
+      color lvlClr;
+      if(score >= 75)
+      {
+         lvlTxt = "HIGH - ENTRY OK";
+         lvlClr = isBull ? C'0,240,130' : C'255,80,80';
+      }
+      else if(score >= 55)
+      {
+         lvlTxt = "MEDIUM - WAIT";
+         lvlClr = C'240,200,50';
+      }
+      else if(score >= 35)
+      {
+         lvlTxt = "LOW - NO ENTRY";
+         lvlClr = C'140,140,155';
+      }
+      else
+      {
+         lvlTxt = "WEAK - STAY OUT";
+         lvlClr = C'100,60,60';
+      }
+      ObjectSetString(0, lvl, OBJPROP_TEXT, lvlTxt);
+      ObjectSetInteger(0, lvl, OBJPROP_COLOR, lvlClr);
+   }
+
+   // Panel border highlight on strong conviction
    string bg = g_prefix + "MSSBg";
    string tt = g_prefix + "MSSTitle";
    if(ObjectFind(0, bg) < 0) return;
 
-   if(score >= 80 && isBull)
+   if(score >= 75 && isBull)
    {
-      ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'12,50,28');
+      ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'10,40,24');
       ObjectSetInteger(0, bg, OBJPROP_BORDER_COLOR, C'0,200,110');
-      if(ObjectFind(0, tt) >= 0) ObjectSetInteger(0, tt, OBJPROP_COLOR, C'0,240,130');
+      if(ObjectFind(0, tt) >= 0) ObjectSetInteger(0, tt, OBJPROP_COLOR, C'0,230,120');
    }
-   else if(score >= 80 && !isBull)
+   else if(score >= 75 && !isBull)
    {
-      ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'50,12,18');
-      ObjectSetInteger(0, bg, OBJPROP_BORDER_COLOR, C'230,50,50');
+      ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'45,10,16');
+      ObjectSetInteger(0, bg, OBJPROP_BORDER_COLOR, C'220,50,50');
       if(ObjectFind(0, tt) >= 0) ObjectSetInteger(0, tt, OBJPROP_COLOR, C'255,80,80');
    }
    else
    {
-      ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'20,22,38');
-      ObjectSetInteger(0, bg, OBJPROP_BORDER_COLOR, C'50,65,110');
-      if(ObjectFind(0, tt) >= 0) ObjectSetInteger(0, tt, OBJPROP_COLOR, C'160,170,200');
+      ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'16,18,32');
+      ObjectSetInteger(0, bg, OBJPROP_BORDER_COLOR, C'45,55,100');
+      if(ObjectFind(0, tt) >= 0) ObjectSetInteger(0, tt, OBJPROP_COLOR, C'130,140,170');
    }
 }
 
