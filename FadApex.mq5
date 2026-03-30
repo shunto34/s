@@ -6,7 +6,7 @@
 //+------------------------------------------------------------------+
 #property copyright "FAD APEX"
 #property link      ""
-#property version   "4.44"
+#property version   "4.45"
 #property indicator_chart_window
 
 #property indicator_buffers 21
@@ -1051,7 +1051,7 @@ void UpdateTrendPanel()
 bool IsPushTF()
 {
    ENUM_TIMEFRAMES p = Period();
-   return(p == PERIOD_M15 || p == PERIOD_H1);
+   return(p == PERIOD_M5 || p == PERIOD_M15 || p == PERIOD_H1);
 }
 
 //+------------------------------------------------------------------+
