@@ -6,7 +6,7 @@
 //+------------------------------------------------------------------+
 #property copyright "FAD APEX"
 #property link      ""
-#property version   "4.43"
+#property version   "4.44"
 #property indicator_chart_window
 
 #property indicator_buffers 21
@@ -304,7 +304,7 @@ void CreateUI()
 void DeleteMSSPanelObjects()
 {
    string names[] = {"MSSBg","MSSTitle","MSSScore","MSSDir","MSSSfx",
-                     "MSSBarBg","MSSBarFill","MSSLevel","MSSTFHdr",
+                     "MSSBarBg","MSSBarFill","MSSLevel","MSSSep","MSSTFHdr",
                      "MSSTF0","MSSTF1","MSSTF2",
                      "MSSArr0","MSSArr1","MSSArr2"};
    for(int i = 0; i < ArraySize(names); i++)
@@ -416,55 +416,51 @@ void CreateMSSPanel()
 {
    if(!g_showMSS) return;
    int chartH = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
-   int pw = 160, ph = 158;
+   int pw = 165, ph = 195;
    int px = 8;
-   int py = chartH - ph - 28;  // 28px above bottom TF tabs
+   int py = chartH - ph - 22;
 
    // Background
    MakePanelRect(g_prefix+"MSSBg", px, py, pw, ph, C'14,16,30', C'45,52,90');
 
-   // Row 1: Title (top of box, 6px padding)
-   MakePanelLabel(g_prefix+"MSSTitle", px+32, py+6, "CONFIDENCE", "Arial Bold", 9, C'100,110,145');
+   // Row 1: Title
+   MakePanelLabel(g_prefix+"MSSTitle", px+30, py+8, "CONFIDENCE", "Arial Bold", 9, C'100,110,145');
 
    // Row 2: Direction
-   MakePanelLabel(g_prefix+"MSSDir", px+8, py+24, "---", "Arial Bold", 10, C'100,100,115');
+   MakePanelLabel(g_prefix+"MSSDir", px+10, py+28, "---", "Arial Bold", 10, C'100,100,115');
 
    // Row 3: Score + /100
-   MakePanelLabel(g_prefix+"MSSScore", px+8, py+44, "---", "Arial Bold", 22, C'100,100,115');
-   MakePanelLabel(g_prefix+"MSSSfx", px+108, py+50, "/100", "Arial", 9, C'55,60,82');
+   MakePanelLabel(g_prefix+"MSSScore", px+10, py+50, "---", "Arial Bold", 22, C'100,100,115');
+   MakePanelLabel(g_prefix+"MSSSfx", px+110, py+58, "/100", "Arial", 9, C'55,60,82');
 
-   // Row 4: Confidence bar
-   MakePanelRect(g_prefix+"MSSBarBg", px+8, py+78, pw-16, 6, C'30,34,52', C'30,34,52');
-   MakePanelRect(g_prefix+"MSSBarFill", px+8, py+78, 1, 6, C'100,100,115', C'100,100,115');
+   // Row 4: Confidence bar  (score 22pt ≈ 30px, so bar at py+88 = 8px gap)
+   MakePanelRect(g_prefix+"MSSBarBg", px+10, py+88, pw-20, 6, C'30,34,52', C'30,34,52');
+   MakePanelRect(g_prefix+"MSSBarFill", px+10, py+88, 1, 6, C'100,100,115', C'100,100,115');
 
    // Row 5: Level text
-   MakePanelLabel(g_prefix+"MSSLevel", px+8, py+90, "---", "Arial Bold", 9, C'100,100,115');
+   MakePanelLabel(g_prefix+"MSSLevel", px+10, py+102, "---", "Arial Bold", 9, C'100,100,115');
 
-   // Row 6: Separator + TF header
-   MakePanelLabel(g_prefix+"MSSTFHdr", px+8, py+110, "MTF ALIGN", "Arial", 7, C'65,72,98');
+   // Row 6: Separator line
+   MakePanelRect(g_prefix+"MSSSep", px+10, py+122, pw-20, 1, C'40,44,68', C'40,44,68');
 
-   // Row 7: TF labels + arrows
+   // Row 7: TF section header
+   MakePanelLabel(g_prefix+"MSSTFHdr", px+10, py+130, "MTF ALIGN", "Arial", 8, C'70,76,105');
+
+   // Row 8: TF labels with status text (no Wingdings — use plain text arrows)
+   //         "M5  UP"  "M15  DN"  "H1  --"
+   int tfY[3] = {py+150, py+150, py+150};
+   int tfX[3] = {px+10, px+60, px+115};
    string tfLabels[3] = {"M5", "M15", "H1"};
-   int dotX[3] = {px+8, px+55, px+108};
-   int dotY = py + 128;
 
    for(int i = 0; i < 3; i++)
    {
+      // TF name
       MakePanelLabel(g_prefix+"MSSTF"+IntegerToString(i),
-                     dotX[i], dotY, tfLabels[i], "Arial Bold", 9, C'100,110,145');
+                     tfX[i], tfY[i], tfLabels[i], "Arial Bold", 9, C'100,110,145');
 
-      string arrLbl = g_prefix + "MSSArr" + IntegerToString(i);
-      ObjectDelete(0, arrLbl);
-      ObjectCreate(0, arrLbl, OBJ_LABEL, 0, 0, 0);
-      ObjectSetInteger(0, arrLbl, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-      ObjectSetInteger(0, arrLbl, OBJPROP_XDISTANCE, dotX[i] + 24);
-      ObjectSetInteger(0, arrLbl, OBJPROP_YDISTANCE, dotY);
-      ObjectSetString(0, arrLbl, OBJPROP_TEXT, CharToString(232));  // dash
-      ObjectSetString(0, arrLbl, OBJPROP_FONT, "Wingdings 3");
-      ObjectSetInteger(0, arrLbl, OBJPROP_FONTSIZE, 11);
-      ObjectSetInteger(0, arrLbl, OBJPROP_COLOR, C'90,90,108');
-      ObjectSetInteger(0, arrLbl, OBJPROP_BACK, false);
-      ObjectSetInteger(0, arrLbl, OBJPROP_SELECTABLE, false);
+      // Status below TF name
+      MakePanelLabel(g_prefix+"MSSArr"+IntegerToString(i),
+                     tfX[i], tfY[i]+16, "--", "Arial Bold", 9, C'90,90,108');
    }
 }
 
@@ -824,21 +820,19 @@ void UpdateMSSPanel(int trend0, int trend1, int trend2,
       if(ObjectFind(0, arrLbl) < 0) continue;
       if(trends[i] == 1)
       {
-         ObjectSetString(0, arrLbl, OBJPROP_TEXT, CharToString(233));  // up arrow
+         ObjectSetString(0, arrLbl, OBJPROP_TEXT, "UP");
          ObjectSetInteger(0, arrLbl, OBJPROP_COLOR, C'0,220,120');
       }
       else if(trends[i] == -1)
       {
-         ObjectSetString(0, arrLbl, OBJPROP_TEXT, CharToString(234));  // down arrow
+         ObjectSetString(0, arrLbl, OBJPROP_TEXT, "DN");
          ObjectSetInteger(0, arrLbl, OBJPROP_COLOR, C'255,60,60');
       }
       else
       {
-         ObjectSetString(0, arrLbl, OBJPROP_TEXT, CharToString(232));  // dash
+         ObjectSetString(0, arrLbl, OBJPROP_TEXT, "--");
          ObjectSetInteger(0, arrLbl, OBJPROP_COLOR, C'90,90,105');
       }
-      ObjectSetString(0, arrLbl, OBJPROP_FONT, "Wingdings 3");
-      ObjectSetInteger(0, arrLbl, OBJPROP_FONTSIZE, 11);
    }
 
    // Calculate confidence score
@@ -885,7 +879,7 @@ void UpdateMSSPanel(int trend0, int trend1, int trend2,
    string barFill = g_prefix + "MSSBarFill";
    if(ObjectFind(0, barFill) >= 0)
    {
-      int barMaxW = 144;  // pw(160) - 16 padding
+      int barMaxW = 145;  // pw(165) - 20 padding
       int barW = (int)(barMaxW * MathMin(100, score) / 100.0);
       if(barW < 1) barW = 1;
       ObjectSetInteger(0, barFill, OBJPROP_XSIZE, barW);
