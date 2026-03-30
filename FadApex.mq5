@@ -6,7 +6,7 @@
 //+------------------------------------------------------------------+
 #property copyright "FAD APEX"
 #property link      ""
-#property version   "4.42"
+#property version   "4.43"
 #property indicator_chart_window
 
 #property indicator_buffers 21
@@ -459,9 +459,9 @@ void CreateMSSPanel()
       ObjectSetInteger(0, arrLbl, OBJPROP_CORNER, CORNER_LEFT_UPPER);
       ObjectSetInteger(0, arrLbl, OBJPROP_XDISTANCE, dotX[i] + 24);
       ObjectSetInteger(0, arrLbl, OBJPROP_YDISTANCE, dotY);
-      ObjectSetString(0, arrLbl, OBJPROP_TEXT, CharToString(159));
-      ObjectSetString(0, arrLbl, OBJPROP_FONT, "Wingdings");
-      ObjectSetInteger(0, arrLbl, OBJPROP_FONTSIZE, 10);
+      ObjectSetString(0, arrLbl, OBJPROP_TEXT, CharToString(232));  // dash
+      ObjectSetString(0, arrLbl, OBJPROP_FONT, "Wingdings 3");
+      ObjectSetInteger(0, arrLbl, OBJPROP_FONTSIZE, 11);
       ObjectSetInteger(0, arrLbl, OBJPROP_COLOR, C'90,90,108');
       ObjectSetInteger(0, arrLbl, OBJPROP_BACK, false);
       ObjectSetInteger(0, arrLbl, OBJPROP_SELECTABLE, false);
@@ -955,7 +955,7 @@ void CreateTrendPanel()
    int chartW = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
    int chartH = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
    int pw = 160, ph = 135;
-   int px = chartW - pw - 55;  // 55px clears price scale
+   int px = chartW - pw - 75;  // 75px clears price scale
    int py = chartH - ph - 28;  // 28px above bottom TF tabs
 
    // Background
