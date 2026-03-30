@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FAD APEX - License Key</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', sans-serif; background: #0f1117; color: #e0e0e0; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+  .card { background: #1a1d27; border-radius: 16px; padding: 40px; max-width: 420px; width: 90%; box-shadow: 0 8px 32px rgba(0,0,0,.4); text-align: center; }
+  h1 { font-size: 14px; letter-spacing: 3px; color: #888; margin-bottom: 24px; text-transform: uppercase; }
+  .month { font-size: 20px; color: #aaa; margin-bottom: 8px; }
+  .key { font-family: 'Consolas', 'Courier New', monospace; font-size: 48px; font-weight: 700; color: #4fc3f7; letter-spacing: 6px; padding: 20px 0; cursor: pointer; transition: color .2s; user-select: all; }
+  .key:hover { color: #81d4fa; }
+  .copied { font-size: 13px; color: #66bb6a; height: 20px; margin-bottom: 16px; }
+  .nav { display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 24px; }
+  .nav button { background: #252833; border: 1px solid #333; color: #ccc; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 14px; transition: background .2s; }
+  .nav button:hover { background: #333; }
+  .nav .current { font-size: 15px; min-width: 120px; color: #aaa; }
+  .grace { margin-top: 20px; padding: 12px; background: #1e2130; border-radius: 8px; font-size: 13px; color: #777; }
+  .grace span { color: #ffb74d; font-family: monospace; font-weight: 600; letter-spacing: 2px; }
+  .master { margin-top: 20px; font-size: 12px; color: #555; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>FAD APEX License Key</h1>
+  <div class="month" id="monthLabel"></div>
+  <div class="key" id="keyDisplay" onclick="copyKey()"></div>
+  <div class="copied" id="copiedMsg"></div>
+  <div class="nav">
+    <button onclick="move(-1)">&larr; Prev</button>
+    <div class="current" id="navLabel"></div>
+    <button onclick="move(1)">Next &rarr;</button>
+  </div>
+  <div class="grace" id="graceBox"></div>
+  <div class="master">Master: SHUNTO-MASTER-FOREVER-2026</div>
+</div>
+<script>
+/*
+ * JavaScript MD5 - blueimp (MIT License)
+ * Based on RFC 1321 implementation by Paul Johnston
+ */
+function md5(string){
+  function safeAdd(x,y){var l=(x&0xFFFF)+(y&0xFFFF);return((x>>16)+(y>>16)+(l>>16))<<16|l&0xFFFF}
+  function rl(n,c){return n<<c|n>>>32-c}
+  function cm(q,a,b,x,s,t){return safeAdd(rl(safeAdd(safeAdd(a,q),safeAdd(x,t)),s),b)}
+  function ff(a,b,c,d,x,s,t){return cm(b&c|~b&d,a,b,x,s,t)}
+  function gg(a,b,c,d,x,s,t){return cm(b&d|c&~d,a,b,x,s,t)}
+  function hh(a,b,c,d,x,s,t){return cm(b^c^d,a,b,x,s,t)}
+  function ii(a,b,c,d,x,s,t){return cm(c^(b|~d),a,b,x,s,t)}
+  function rstr2binl(s){var o=[];o[(s.length>>2)-1]=undefined;for(var i=0;i<o.length;i++)o[i]=0;for(var i=0;i<s.length*8;i+=8)o[i>>5]|=(s.charCodeAt(i/8)&0xFF)<<i%32;return o}
+  function binl2hex(a){var h='0123456789abcdef',o='';for(var i=0;i<a.length*32;i+=8)o+=h.charAt(a[i>>5]>>>i%32+4&0xF)+h.charAt(a[i>>5]>>>i%32&0xF);return o}
+  function binlMD5(x,len){
+    x[len>>5]|=0x80<<len%32;x[(((len+64)>>>9)<<4)+14]=len;
+    var a=1732584193,b=-271733879,c=-1732584194,d=271733878;
+    for(var i=0;i<x.length;i+=16){
+      var oa=a,ob=b,oc=c,od=d;
+      a=ff(a,b,c,d,x[i],7,-680876936);d=ff(d,a,b,c,x[i+1],12,-389564586);c=ff(c,d,a,b,x[i+2],17,606105819);b=ff(b,c,d,a,x[i+3],22,-1044525330);
+      a=ff(a,b,c,d,x[i+4],7,-176418897);d=ff(d,a,b,c,x[i+5],12,1200080426);c=ff(c,d,a,b,x[i+6],17,-1473231341);b=ff(b,c,d,a,x[i+7],22,-45705983);
+      a=ff(a,b,c,d,x[i+8],7,1770035416);d=ff(d,a,b,c,x[i+9],12,-1958414417);c=ff(c,d,a,b,x[i+10],17,-42063);b=ff(b,c,d,a,x[i+11],22,-1990404162);
+      a=ff(a,b,c,d,x[i+12],7,1804603682);d=ff(d,a,b,c,x[i+13],12,-40341101);c=ff(c,d,a,b,x[i+14],17,-1502002290);b=ff(b,c,d,a,x[i+15],22,1236535329);
+      a=gg(a,b,c,d,x[i+1],5,-165796510);d=gg(d,a,b,c,x[i+6],9,-1069501632);c=gg(c,d,a,b,x[i+11],14,643717713);b=gg(b,c,d,a,x[i],20,-373897302);
+      a=gg(a,b,c,d,x[i+5],5,-701558691);d=gg(d,a,b,c,x[i+10],9,38016083);c=gg(c,d,a,b,x[i+15],14,-660478335);b=gg(b,c,d,a,x[i+4],20,-405537848);
+      a=gg(a,b,c,d,x[i+9],5,568446438);d=gg(d,a,b,c,x[i+14],9,-1019803690);c=gg(c,d,a,b,x[i+3],14,-187363961);b=gg(b,c,d,a,x[i+8],20,1163531501);
+      a=gg(a,b,c,d,x[i+13],5,-1444681467);d=gg(d,a,b,c,x[i+2],9,-51403784);c=gg(c,d,a,b,x[i+7],14,1735328473);b=gg(b,c,d,a,x[i+12],20,-1926607734);
+      a=hh(a,b,c,d,x[i+5],4,-378558);d=hh(d,a,b,c,x[i+8],11,-2022574463);c=hh(c,d,a,b,x[i+11],16,1839030562);b=hh(b,c,d,a,x[i+14],23,-35309556);
+      a=hh(a,b,c,d,x[i+1],4,-1530992060);d=hh(d,a,b,c,x[i+4],11,1272893353);c=hh(c,d,a,b,x[i+7],16,-155497632);b=hh(b,c,d,a,x[i+10],23,-1094730640);
+      a=hh(a,b,c,d,x[i+13],4,681279174);d=hh(d,a,b,c,x[i],11,-358537222);c=hh(c,d,a,b,x[i+3],16,-722521979);b=hh(b,c,d,a,x[i+6],23,76029189);
+      a=hh(a,b,c,d,x[i+9],4,-640364487);d=hh(d,a,b,c,x[i+12],11,-421815835);c=hh(c,d,a,b,x[i+15],16,530742520);b=hh(b,c,d,a,x[i+2],23,-995338651);
+      a=ii(a,b,c,d,x[i],6,-198630844);d=ii(d,a,b,c,x[i+7],10,1126891415);c=ii(c,d,a,b,x[i+14],15,-1416354905);b=ii(b,c,d,a,x[i+5],21,-57434055);
+      a=ii(a,b,c,d,x[i+12],6,1700485571);d=ii(d,a,b,c,x[i+3],10,-1894986606);c=ii(c,d,a,b,x[i+10],15,-1051523);b=ii(b,c,d,a,x[i+1],21,-2054922799);
+      a=ii(a,b,c,d,x[i+8],6,1873313359);d=ii(d,a,b,c,x[i+15],10,-30611744);c=ii(c,d,a,b,x[i+6],15,-1560198380);b=ii(b,c,d,a,x[i+13],21,1309151649);
+      a=ii(a,b,c,d,x[i+4],6,-145523070);d=ii(d,a,b,c,x[i+11],10,-1120210379);c=ii(c,d,a,b,x[i+2],15,718787259);b=ii(b,c,d,a,x[i+9],21,-343485551);
+      a=safeAdd(a,oa);b=safeAdd(b,ob);c=safeAdd(c,oc);d=safeAdd(d,od);
+    }
+    return [a,b,c,d];
+  }
+  var s=unescape(encodeURIComponent(string));
+  var w=rstr2binl(s);
+  var h=binlMD5(w,s.length*8);
+  return binl2hex(h).toUpperCase();
+}
+
+const SECRET = "shunto_fx_2026";
+let viewYear, viewMonth;
+
+function genKey(y, m) {
+  const src = SECRET + String(y).padStart(4,'0') + String(m).padStart(2,'0');
+  return md5(src).substring(0, 8);
+}
+
+function render() {
+  const mNames = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+  document.getElementById('monthLabel').textContent = viewYear + '年 ' + mNames[viewMonth - 1];
+  document.getElementById('keyDisplay').textContent = genKey(viewYear, viewMonth);
+  document.getElementById('navLabel').textContent = viewYear + '/' + String(viewMonth).padStart(2,'0');
+  document.getElementById('copiedMsg').textContent = '';
+  let pm = viewMonth - 1, py = viewYear;
+  if (pm < 1) { pm = 12; py--; }
+  document.getElementById('graceBox').innerHTML =
+    'Previous month key (grace): <span>' + genKey(py, pm) + '</span>';
+}
+
+function move(d) {
+  viewMonth += d;
+  if (viewMonth > 12) { viewMonth = 1; viewYear++; }
+  if (viewMonth < 1)  { viewMonth = 12; viewYear--; }
+  render();
+}
+
+function copyKey() {
+  const key = document.getElementById('keyDisplay').textContent;
+  navigator.clipboard.writeText(key).then(() => {
+    document.getElementById('copiedMsg').textContent = 'Copied!';
+    setTimeout(() => document.getElementById('copiedMsg').textContent = '', 1500);
+  });
+}
+
+const now = new Date();
+viewYear = now.getFullYear();
+viewMonth = now.getMonth() + 1;
+render();
+</script>
+</body>
+</html>
