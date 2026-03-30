@@ -1,12 +1,12 @@
 //+------------------------------------------------------------------+
-//| TimeDilationTrendVisualizer.mq5                                  |
-//| Pine Script - Time Dilation Trend Visualizer [EZPZ]              |
+//| FAD APEX                                                         |
+//| Multi-Timeframe Trend & Structure Indicator                      |
 //| Components: EMA Ribbon, MTF Structure (BOS/MSS),                 |
-//|             BULL/BEAR Signals, Key Levels, Candle Coloring        |
+//|             BULL/BEAR Signals, Key Levels, EXIT TP, Range Filter  |
 //+------------------------------------------------------------------+
-#property copyright "Time Dilation Trend Visualizer [EZPZ]"
+#property copyright "FAD APEX"
 #property link      ""
-#property version   "4.32"
+#property version   "4.33"
 #property indicator_chart_window
 
 #property indicator_buffers 21
@@ -170,7 +170,7 @@ bool g_showTrend  = true;
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   g_prefix = "TDTV_";
+   g_prefix = "FAPX_";
    g_mtfTF[0] = PERIOD_M5;
    g_mtfTF[1] = PERIOD_M15;
    g_mtfTF[2] = PERIOD_H1;
@@ -244,7 +244,7 @@ int OnInit()
    CreateTrendPanel();
    CreateToggleButtons();
 
-   IndicatorSetString(INDICATOR_SHORTNAME, "[FAD]TimeDilationTrendVisualizer");
+   IndicatorSetString(INDICATOR_SHORTNAME, "FAD APEX");
    return(INIT_SUCCEEDED);
 }
 
@@ -369,7 +369,7 @@ void CreateWatermark()
    ObjectSetInteger(0, nm, OBJPROP_YDISTANCE, chartH / 2);
    string tf = EnumToString(Period());
    StringReplace(tf, "PERIOD_", "");
-   ObjectSetString(0, nm, OBJPROP_TEXT, _Symbol + " " + tf + " | [FAD] TDTV");
+   ObjectSetString(0, nm, OBJPROP_TEXT, _Symbol + " " + tf + " | FAD APEX");
    ObjectSetString(0, nm, OBJPROP_FONT, "Arial Bold");
    ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, 22);
    ObjectSetInteger(0, nm, OBJPROP_COLOR, C'50,50,60');
@@ -1069,7 +1069,7 @@ void SendSignalAlert(string direction, double price)
    Alert(msg);
    if(InpPushNotify && IsPushTF())
       SendNotification(msg);
-   Print("TDTV Alert: ", msg);
+   Print("FAD APEX: ", msg);
 }
 
 //+------------------------------------------------------------------+
@@ -1385,7 +1385,7 @@ void ProcessHTF(int tfIdx, int lb,
                   Alert(mssMsg);
                   if(InpPushNotify && IsPushTF())
                      SendNotification(mssMsg);
-                  Print("TDTV MSS: ", mssMsg);
+                  Print("FAD APEX MSS: ", mssMsg);
                }
             }
          }
@@ -1675,7 +1675,7 @@ int OnCalculate(const int rates_total,
                   Alert(exitMsg);
                   if(InpPushNotify && IsPushTF())
                      SendNotification(exitMsg);
-                  Print("TDTV EXIT: ", exitMsg);
+                  Print("FAD APEX EXIT: ", exitMsg);
                }
             }
          }
