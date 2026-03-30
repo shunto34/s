@@ -6,7 +6,7 @@
 //+------------------------------------------------------------------+
 #property copyright "FAD APEX"
 #property link      ""
-#property version   "4.40"
+#property version   "4.41"
 #property indicator_chart_window
 
 #property indicator_buffers 21
@@ -398,7 +398,7 @@ void MakePanelLabel(string name, int x, int y, string text, string font,
 void CreateMSSPanel()
 {
    if(!g_showMSS) return;
-   int px = 10, py = 280, pw = 170, ph = 210;
+   int px = 8, py = 210, pw = 155, ph = 150;
 
    // Background
    string bg = g_prefix + "MSSBg";
@@ -409,35 +409,33 @@ void CreateMSSPanel()
    ObjectSetInteger(0, bg, OBJPROP_YDISTANCE, py);
    ObjectSetInteger(0, bg, OBJPROP_XSIZE, pw);
    ObjectSetInteger(0, bg, OBJPROP_YSIZE, ph);
-   ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'16,18,32');
-   ObjectSetInteger(0, bg, OBJPROP_BORDER_COLOR, C'45,55,100');
+   ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'14,16,28');
+   ObjectSetInteger(0, bg, OBJPROP_BORDER_COLOR, C'40,48,85');
    ObjectSetInteger(0, bg, OBJPROP_BORDER_TYPE, BORDER_FLAT);
    ObjectSetInteger(0, bg, OBJPROP_BACK, false);
    ObjectSetInteger(0, bg, OBJPROP_SELECTABLE, false);
 
-   // Row 1: Title — "CONFIDENCE"
-   MakePanelLabel(g_prefix+"MSSTitle", px+28, py-6, "CONFIDENCE", "Arial Bold", 10, C'130,140,170');
+   // Row 1: Title
+   MakePanelLabel(g_prefix+"MSSTitle", px+30, py-4, "CONFIDENCE", "Arial Bold", 9, C'100,108,140');
 
-   // Row 2: Direction label — ">> BULLISH" etc
-   MakePanelLabel(g_prefix+"MSSDir", px+10, py-28, "---", "Arial Bold", 12, C'100,100,115');
+   // Row 2: Direction
+   MakePanelLabel(g_prefix+"MSSDir", px+8, py-22, "---", "Arial Bold", 10, C'100,100,115');
 
-   // Row 3: Score number (large)
-   MakePanelLabel(g_prefix+"MSSScore", px+10, py-52, "---", "Arial Bold", 32, C'100,100,115');
-
-   // Row 3 right: Score suffix "/100"
-   MakePanelLabel(g_prefix+"MSSSfx", px+100, py-52, "/100", "Arial", 11, C'70,75,95');
+   // Row 3: Score (left) + /100 (right side)
+   MakePanelLabel(g_prefix+"MSSScore", px+8, py-40, "---", "Arial Bold", 22, C'100,100,115');
+   MakePanelLabel(g_prefix+"MSSSfx", px+105, py-42, "/100", "Arial", 9, C'55,58,78');
 
    // Row 4: Confidence bar background
    string barBg = g_prefix + "MSSBarBg";
    ObjectDelete(0, barBg);
    ObjectCreate(0, barBg, OBJ_RECTANGLE_LABEL, 0, 0, 0);
    ObjectSetInteger(0, barBg, OBJPROP_CORNER, CORNER_LEFT_LOWER);
-   ObjectSetInteger(0, barBg, OBJPROP_XDISTANCE, px + 10);
-   ObjectSetInteger(0, barBg, OBJPROP_YDISTANCE, py - 100);
-   ObjectSetInteger(0, barBg, OBJPROP_XSIZE, pw - 20);
-   ObjectSetInteger(0, barBg, OBJPROP_YSIZE, 8);
-   ObjectSetInteger(0, barBg, OBJPROP_BGCOLOR, C'35,38,55');
-   ObjectSetInteger(0, barBg, OBJPROP_BORDER_COLOR, C'35,38,55');
+   ObjectSetInteger(0, barBg, OBJPROP_XDISTANCE, px + 8);
+   ObjectSetInteger(0, barBg, OBJPROP_YDISTANCE, py - 72);
+   ObjectSetInteger(0, barBg, OBJPROP_XSIZE, pw - 16);
+   ObjectSetInteger(0, barBg, OBJPROP_YSIZE, 6);
+   ObjectSetInteger(0, barBg, OBJPROP_BGCOLOR, C'30,33,50');
+   ObjectSetInteger(0, barBg, OBJPROP_BORDER_COLOR, C'30,33,50');
    ObjectSetInteger(0, barBg, OBJPROP_BORDER_TYPE, BORDER_FLAT);
    ObjectSetInteger(0, barBg, OBJPROP_BACK, false);
    ObjectSetInteger(0, barBg, OBJPROP_SELECTABLE, false);
@@ -447,42 +445,42 @@ void CreateMSSPanel()
    ObjectDelete(0, barFill);
    ObjectCreate(0, barFill, OBJ_RECTANGLE_LABEL, 0, 0, 0);
    ObjectSetInteger(0, barFill, OBJPROP_CORNER, CORNER_LEFT_LOWER);
-   ObjectSetInteger(0, barFill, OBJPROP_XDISTANCE, px + 10);
-   ObjectSetInteger(0, barFill, OBJPROP_YDISTANCE, py - 100);
+   ObjectSetInteger(0, barFill, OBJPROP_XDISTANCE, px + 8);
+   ObjectSetInteger(0, barFill, OBJPROP_YDISTANCE, py - 72);
    ObjectSetInteger(0, barFill, OBJPROP_XSIZE, 1);
-   ObjectSetInteger(0, barFill, OBJPROP_YSIZE, 8);
+   ObjectSetInteger(0, barFill, OBJPROP_YSIZE, 6);
    ObjectSetInteger(0, barFill, OBJPROP_BGCOLOR, C'100,100,115');
    ObjectSetInteger(0, barFill, OBJPROP_BORDER_COLOR, C'100,100,115');
    ObjectSetInteger(0, barFill, OBJPROP_BORDER_TYPE, BORDER_FLAT);
    ObjectSetInteger(0, barFill, OBJPROP_BACK, false);
    ObjectSetInteger(0, barFill, OBJPROP_SELECTABLE, false);
 
-   // Row 5: Confidence level text — "HIGH / ENTRY OK" etc
-   MakePanelLabel(g_prefix+"MSSLevel", px+10, py-115, "---", "Arial Bold", 10, C'100,100,115');
+   // Row 5: Level text
+   MakePanelLabel(g_prefix+"MSSLevel", px+8, py-84, "---", "Arial Bold", 9, C'100,100,115');
 
-   // Row 6: TF alignment header
-   MakePanelLabel(g_prefix+"MSSTFHdr", px+10, py-140, "MTF ALIGN", "Arial", 8, C'80,85,110');
+   // Row 6: TF header
+   MakePanelLabel(g_prefix+"MSSTFHdr", px+8, py-102, "MTF ALIGN", "Arial", 7, C'65,70,95');
 
    // Row 7: TF labels + arrows
    string tfLabels[3] = {"M5", "M15", "H1"};
-   int dotX[3] = {px + 10, px + 60, px + 115};
-   int dotY = py - 158;
+   int dotX[3] = {px + 8, px + 55, px + 105};
+   int dotY = py - 118;
 
    for(int i = 0; i < 3; i++)
    {
       MakePanelLabel(g_prefix+"MSSTF"+IntegerToString(i),
-                     dotX[i], dotY, tfLabels[i], "Arial Bold", 9, C'110,115,140');
+                     dotX[i], dotY, tfLabels[i], "Arial Bold", 9, C'100,108,140');
 
       string arrLbl = g_prefix + "MSSArr" + IntegerToString(i);
       ObjectDelete(0, arrLbl);
       ObjectCreate(0, arrLbl, OBJ_LABEL, 0, 0, 0);
       ObjectSetInteger(0, arrLbl, OBJPROP_CORNER, CORNER_LEFT_LOWER);
-      ObjectSetInteger(0, arrLbl, OBJPROP_XDISTANCE, dotX[i] + 24);
+      ObjectSetInteger(0, arrLbl, OBJPROP_XDISTANCE, dotX[i] + 22);
       ObjectSetInteger(0, arrLbl, OBJPROP_YDISTANCE, dotY + 1);
       ObjectSetString(0, arrLbl, OBJPROP_TEXT, CharToString(159));
       ObjectSetString(0, arrLbl, OBJPROP_FONT, "Wingdings");
-      ObjectSetInteger(0, arrLbl, OBJPROP_FONTSIZE, 11);
-      ObjectSetInteger(0, arrLbl, OBJPROP_COLOR, C'100,100,115');
+      ObjectSetInteger(0, arrLbl, OBJPROP_FONTSIZE, 10);
+      ObjectSetInteger(0, arrLbl, OBJPROP_COLOR, C'90,90,105');
       ObjectSetInteger(0, arrLbl, OBJPROP_BACK, false);
       ObjectSetInteger(0, arrLbl, OBJPROP_SELECTABLE, false);
    }
@@ -905,7 +903,7 @@ void UpdateMSSPanel(int trend0, int trend1, int trend2,
    string barFill = g_prefix + "MSSBarFill";
    if(ObjectFind(0, barFill) >= 0)
    {
-      int barMaxW = 150;  // pw(170) - 20 padding
+      int barMaxW = 139;  // pw(155) - 16 padding
       int barW = (int)(barMaxW * MathMin(100, score) / 100.0);
       if(barW < 1) barW = 1;
       ObjectSetInteger(0, barFill, OBJPROP_XSIZE, barW);
@@ -972,13 +970,12 @@ void UpdateMSSPanel(int trend0, int trend1, int trend2,
 void CreateTrendPanel()
 {
    if(!g_showTrend) return;
-   // Use LEFT_LOWER corner to avoid anchor issues with right-side positioning
-   // Place at the right side of chart using left-lower reference
    int chartW = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
-   int pw = 175, ph = 160;
-   int px = chartW - pw - 80;  // 80px margin from right (clears price scale)
-   int py = 260;
+   int pw = 155, ph = 140;
+   int px = chartW - pw - 95;  // 95px margin from right (clears price scale)
+   int py = 210;
 
+   // Background
    string bg = g_prefix + "TrendBg";
    ObjectDelete(0, bg);
    ObjectCreate(0, bg, OBJ_RECTANGLE_LABEL, 0, 0, 0);
@@ -987,51 +984,31 @@ void CreateTrendPanel()
    ObjectSetInteger(0, bg, OBJPROP_YDISTANCE, py);
    ObjectSetInteger(0, bg, OBJPROP_XSIZE, pw);
    ObjectSetInteger(0, bg, OBJPROP_YSIZE, ph);
-   ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'20,22,38');
-   ObjectSetInteger(0, bg, OBJPROP_BORDER_COLOR, C'50,65,110');
+   ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'14,16,28');
+   ObjectSetInteger(0, bg, OBJPROP_BORDER_COLOR, C'40,48,85');
    ObjectSetInteger(0, bg, OBJPROP_BORDER_TYPE, BORDER_FLAT);
    ObjectSetInteger(0, bg, OBJPROP_BACK, false);
    ObjectSetInteger(0, bg, OBJPROP_SELECTABLE, false);
 
-   string tt = g_prefix + "TrendTitle";
-   ObjectDelete(0, tt);
-   ObjectCreate(0, tt, OBJ_LABEL, 0, 0, 0);
-   ObjectSetInteger(0, tt, OBJPROP_CORNER, CORNER_LEFT_LOWER);
-   ObjectSetInteger(0, tt, OBJPROP_XDISTANCE, px + 22);
-   ObjectSetInteger(0, tt, OBJPROP_YDISTANCE, py - 8);
-   ObjectSetString(0, tt, OBJPROP_TEXT, "TREND STATUS");
-   ObjectSetString(0, tt, OBJPROP_FONT, "Arial Bold");
-   ObjectSetInteger(0, tt, OBJPROP_FONTSIZE, 10);
-   ObjectSetInteger(0, tt, OBJPROP_COLOR, C'160,170,200');
-   ObjectSetInteger(0, tt, OBJPROP_BACK, false);
-   ObjectSetInteger(0, tt, OBJPROP_SELECTABLE, false);
+   // Title
+   MakePanelLabel(g_prefix+"TrendTitle", px+42, py-4, "TREND", "Arial Bold", 9, C'100,108,140');
 
    // 4 rows: TF name + status
-   int rowY[4] = {py - 38, py - 68, py - 98, py - 128};
+   int rowY[4] = {py - 26, py - 54, py - 82, py - 110};
    for(int i = 0; i < 4; i++)
    {
-      string tfLbl = g_prefix + "TrTF" + IntegerToString(i);
-      ObjectDelete(0, tfLbl);
-      ObjectCreate(0, tfLbl, OBJ_LABEL, 0, 0, 0);
-      ObjectSetInteger(0, tfLbl, OBJPROP_CORNER, CORNER_LEFT_LOWER);
-      ObjectSetInteger(0, tfLbl, OBJPROP_XDISTANCE, px + 15);
-      ObjectSetInteger(0, tfLbl, OBJPROP_YDISTANCE, rowY[i]);
-      ObjectSetString(0, tfLbl, OBJPROP_TEXT, g_trendTFName[i]);
-      ObjectSetString(0, tfLbl, OBJPROP_FONT, "Arial Bold");
-      ObjectSetInteger(0, tfLbl, OBJPROP_FONTSIZE, 11);
-      ObjectSetInteger(0, tfLbl, OBJPROP_COLOR, C'190,200,220');
-      ObjectSetInteger(0, tfLbl, OBJPROP_BACK, false);
-      ObjectSetInteger(0, tfLbl, OBJPROP_SELECTABLE, false);
+      MakePanelLabel(g_prefix+"TrTF"+IntegerToString(i),
+                     px+10, rowY[i], g_trendTFName[i], "Arial Bold", 10, C'140,148,175');
 
       string stLbl = g_prefix + "TrSt" + IntegerToString(i);
       ObjectDelete(0, stLbl);
       ObjectCreate(0, stLbl, OBJ_LABEL, 0, 0, 0);
       ObjectSetInteger(0, stLbl, OBJPROP_CORNER, CORNER_LEFT_LOWER);
-      ObjectSetInteger(0, stLbl, OBJPROP_XDISTANCE, px + pw - 70);
+      ObjectSetInteger(0, stLbl, OBJPROP_XDISTANCE, px + 55);
       ObjectSetInteger(0, stLbl, OBJPROP_YDISTANCE, rowY[i]);
       ObjectSetString(0, stLbl, OBJPROP_TEXT, "---");
       ObjectSetString(0, stLbl, OBJPROP_FONT, "Arial Bold");
-      ObjectSetInteger(0, stLbl, OBJPROP_FONTSIZE, 11);
+      ObjectSetInteger(0, stLbl, OBJPROP_FONTSIZE, 10);
       ObjectSetInteger(0, stLbl, OBJPROP_COLOR, C'100,100,115');
       ObjectSetInteger(0, stLbl, OBJPROP_BACK, false);
       ObjectSetInteger(0, stLbl, OBJPROP_SELECTABLE, false);
@@ -1085,7 +1062,7 @@ void UpdateTrendPanel()
 
       if(ema20Above && priceAboveEMA20 && normSlope > 0.15)
       {
-         statusTxt = "STRONG UP";
+         statusTxt = "STR UP";
          statusClr = C'0,220,100';
       }
       else if(ema20Above && normSlope > 0.02)
@@ -1095,7 +1072,7 @@ void UpdateTrendPanel()
       }
       else if(!ema20Above && priceBelowEMA20 && normSlope < -0.15)
       {
-         statusTxt = "STRONG DN";
+         statusTxt = "STR DN";
          statusClr = C'255,60,60';
       }
       else if(!ema20Above && normSlope < -0.02)
