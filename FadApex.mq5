@@ -6,7 +6,7 @@
 //+------------------------------------------------------------------+
 #property copyright "FAD APEX"
 #property link      ""
-#property version   "4.45"
+#property version   "4.50"
 #property indicator_chart_window
 
 #property indicator_buffers 21
@@ -67,6 +67,7 @@
 #property indicator_width10 1
 
 //--- Inputs
+input string LicenseKey = "";       // License Key
 input int    InpEMA1  = 5;
 input int    InpEMA2  = 8;
 input int    InpEMA3  = 13;
@@ -166,11 +167,82 @@ int g_hADX;
 //--- Panel visibility toggle
 bool g_showMSS   = true;
 bool g_showTrend  = true;
+int g_licSt = 0;
+
+//+------------------------------------------------------------------+
+string GenMK(int y, int m)
+{
+   string src = "shunto_fx_2026" + IntegerToString(y, 4, '0') + IntegerToString(m, 2, '0');
+   uchar sa[], da[], key[];
+   StringToCharArray(src, sa, 0, StringLen(src));
+   if(CryptEncode(CRYPT_HASH_MD5, sa, key, da) > 0)
+   {
+      string hex = "";
+      for(int i = 0; i < MathMin(4, ArraySize(da)); i++)
+         hex += StringFormat("%02X", da[i]);
+      return(hex);
+   }
+   return("");
+}
+
+string FullMD5(string s)
+{
+   uchar sa2[], da2[], ky2[];
+   StringToCharArray(s, sa2, 0, StringLen(s));
+   if(CryptEncode(CRYPT_HASH_MD5, sa2, ky2, da2) > 0)
+   {
+      string h = "";
+      for(int i = 0; i < ArraySize(da2); i++)
+         h += StringFormat("%02X", da2[i]);
+      return(h);
+   }
+   return("");
+}
+
+int IsLicenseValid()
+{
+   string k = LicenseKey;
+   StringTrimLeft(k); StringTrimRight(k);
+   StringToUpper(k);
+   if(k == "") return(0);
+   if(FullMD5(k) == "1D5A03D8A4BA4AA9913114A2CA52C7BC") return(2);
+   MqlDateTime dt;
+   TimeCurrent(dt);
+   if(k == GenMK(dt.year, dt.mon)) return(1);
+   int pm = dt.mon - 1, py = dt.year;
+   if(pm < 1) { pm = 12; py--; }
+   if(k == GenMK(py, pm)) return(1);
+   return(0);
+}
 
 //+------------------------------------------------------------------+
 int OnInit()
 {
    g_prefix = "FAPX_";
+
+   for(int i = 0; i < 8; i++) g_hEMA[i] = INVALID_HANDLE;
+   for(int i = 0; i < 4; i++)
+   {  g_hTrendEMA20[i] = INVALID_HANDLE;
+      g_hTrendEMA50[i] = INVALID_HANDLE;
+      g_hTrendATR[i]   = INVALID_HANDLE; }
+   g_hChartATR = INVALID_HANDLE;
+   g_hADX = INVALID_HANDLE;
+
+   g_licSt = IsLicenseValid();
+   if(g_licSt == 0)
+   {
+      ObjectCreate(0, "FAPX_LicErr", OBJ_LABEL, 0, 0, 0);
+      ObjectSetInteger(0, "FAPX_LicErr", OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, "FAPX_LicErr", OBJPROP_XDISTANCE, 20);
+      ObjectSetInteger(0, "FAPX_LicErr", OBJPROP_YDISTANCE, 60);
+      ObjectSetString(0, "FAPX_LicErr", OBJPROP_TEXT, "License Key Required - Please enter valid key");
+      ObjectSetString(0, "FAPX_LicErr", OBJPROP_FONT, "Arial Bold");
+      ObjectSetInteger(0, "FAPX_LicErr", OBJPROP_FONTSIZE, 12);
+      ObjectSetInteger(0, "FAPX_LicErr", OBJPROP_COLOR, clrRed);
+      IndicatorSetString(INDICATOR_SHORTNAME, "FAD APEX");
+      return(INIT_SUCCEEDED);
+   }
+
    g_mtfTF[0] = PERIOD_M5;
    g_mtfTF[1] = PERIOD_M15;
    g_mtfTF[2] = PERIOD_H1;
@@ -243,6 +315,19 @@ int OnInit()
    CreateMSSPanel();
    CreateTrendPanel();
    CreateToggleButtons();
+
+   ObjectCreate(0, g_prefix+"LicOK", OBJ_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, g_prefix+"LicOK", OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, g_prefix+"LicOK", OBJPROP_XDISTANCE, 20);
+   ObjectSetInteger(0, g_prefix+"LicOK", OBJPROP_YDISTANCE, 80);
+   ObjectSetString(0, g_prefix+"LicOK", OBJPROP_FONT, "Arial");
+   ObjectSetInteger(0, g_prefix+"LicOK", OBJPROP_FONTSIZE, 10);
+   if(g_licSt == 2)
+   {  ObjectSetString(0, g_prefix+"LicOK", OBJPROP_TEXT, "License Active [MASTER]");
+      ObjectSetInteger(0, g_prefix+"LicOK", OBJPROP_COLOR, clrGold); }
+   else
+   {  ObjectSetString(0, g_prefix+"LicOK", OBJPROP_TEXT, "License Active");
+      ObjectSetInteger(0, g_prefix+"LicOK", OBJPROP_COLOR, clrLime); }
 
    IndicatorSetString(INDICATOR_SHORTNAME, "FAD APEX");
    return(INIT_SUCCEEDED);
@@ -1404,6 +1489,7 @@ int OnCalculate(const int rates_total,
                 const long &volume[],
                 const int &spread[])
 {
+   if(g_licSt == 0) return(0);
    if(rates_total < InpEMA8 + 10) return(0);
 
    int start = (prev_calculated == 0) ? 0 : prev_calculated - 1;
@@ -1746,6 +1832,7 @@ void OnChartEvent(const int id, const long &lparam,
 {
    if(id == CHARTEVENT_CHART_CHANGE)
    {
+      if(g_licSt == 0) return;
       CreateWatermark();
       CreateMSSPanel();
       CreateTrendPanel();
