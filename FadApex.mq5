@@ -6,7 +6,7 @@
 //+------------------------------------------------------------------+
 #property copyright "FAD APEX"
 #property link      ""
-#property version   "4.51"
+#property version   "4.52"
 #property indicator_chart_window
 
 #property indicator_buffers 21
@@ -138,6 +138,12 @@ double g_barTrend2[];
 //--- Master trend
 int g_masterTrend;
 
+//--- Persistent signal chain state (survives across newBar calls)
+int g_persistPrevMaster    = 0;
+int g_persistLastSignalBar = -9999;
+int g_persistLastExitBar   = -9999;
+int g_persistLastCalcBar   = -1;
+
 //--- Key levels
 string g_prefix;
 int    g_hiLvlCnt;
@@ -179,6 +185,11 @@ int OnInit()
       g_hTrendATR[i]   = INVALID_HANDLE; }
    g_hChartATR = INVALID_HANDLE;
    g_hADX = INVALID_HANDLE;
+
+   g_persistPrevMaster    = 0;
+   g_persistLastSignalBar = -9999;
+   g_persistLastExitBar   = -9999;
+   g_persistLastCalcBar   = -1;
 
    g_mtfTF[0] = PERIOD_M5;
    g_mtfTF[1] = PERIOD_M15;
@@ -1418,14 +1429,14 @@ int OnCalculate(const int rates_total,
    ArraySetAsSeries(g_ed4, false); ArraySetAsSeries(g_ed5, false);
    ArraySetAsSeries(g_ed6, false); ArraySetAsSeries(g_ed7, false);
 
-   if(CopyBuffer(g_hEMA[0],0,0,rates_total,g_ed0)<rates_total) return(0);
-   if(CopyBuffer(g_hEMA[1],0,0,rates_total,g_ed1)<rates_total) return(0);
-   if(CopyBuffer(g_hEMA[2],0,0,rates_total,g_ed2)<rates_total) return(0);
-   if(CopyBuffer(g_hEMA[3],0,0,rates_total,g_ed3)<rates_total) return(0);
-   if(CopyBuffer(g_hEMA[4],0,0,rates_total,g_ed4)<rates_total) return(0);
-   if(CopyBuffer(g_hEMA[5],0,0,rates_total,g_ed5)<rates_total) return(0);
-   if(CopyBuffer(g_hEMA[6],0,0,rates_total,g_ed6)<rates_total) return(0);
-   if(CopyBuffer(g_hEMA[7],0,0,rates_total,g_ed7)<rates_total) return(0);
+   if(CopyBuffer(g_hEMA[0],0,0,rates_total,g_ed0)<rates_total) return(prev_calculated);
+   if(CopyBuffer(g_hEMA[1],0,0,rates_total,g_ed1)<rates_total) return(prev_calculated);
+   if(CopyBuffer(g_hEMA[2],0,0,rates_total,g_ed2)<rates_total) return(prev_calculated);
+   if(CopyBuffer(g_hEMA[3],0,0,rates_total,g_ed3)<rates_total) return(prev_calculated);
+   if(CopyBuffer(g_hEMA[4],0,0,rates_total,g_ed4)<rates_total) return(prev_calculated);
+   if(CopyBuffer(g_hEMA[5],0,0,rates_total,g_ed5)<rates_total) return(prev_calculated);
+   if(CopyBuffer(g_hEMA[6],0,0,rates_total,g_ed6)<rates_total) return(prev_calculated);
+   if(CopyBuffer(g_hEMA[7],0,0,rates_total,g_ed7)<rates_total) return(prev_calculated);
 
    //=== Phase 1b: Fill ribbon + candle buffers ===
    for(int i = start; i < rates_total; i++)
@@ -1495,10 +1506,35 @@ int OnCalculate(const int rates_total,
                     fullRecalc, g_barTrend2);
 
       //=== Phase 3: BULL/BEAR signals with S/A/B ranking + range filter ===
-      int prevMaster = 0;
       int startSig = InpEMA8 + 10;
-      int lastSignalBar = -9999;  // Anti-whipsaw: track last signal bar
-      int lastExitBar   = -9999;  // EXIT cooldown tracker
+      int prevMaster, lastSignalBar, lastExitBar;
+
+      if(fullRecalc)
+      {
+         prevMaster    = 0;
+         lastSignalBar = -9999;
+         lastExitBar   = -9999;
+      }
+      else  // newBar: resume from persisted state
+      {
+         prevMaster    = g_persistPrevMaster;
+         lastSignalBar = g_persistLastSignalBar;
+         lastExitBar   = g_persistLastExitBar;
+         if(g_persistLastCalcBar >= startSig)
+            startSig = g_persistLastCalcBar;
+
+         // Clean up forming-bar signal objects (bar may have changed on close)
+         if(g_persistLastCalcBar >= 0)
+         {
+            string barIdx = IntegerToString(g_persistLastCalcBar);
+            ObjectDelete(0, g_prefix + "DotBull" + barIdx);
+            ObjectDelete(0, g_prefix + "SigBull" + barIdx);
+            ObjectDelete(0, g_prefix + "DotBear" + barIdx);
+            ObjectDelete(0, g_prefix + "SigBear" + barIdx);
+            ObjectDelete(0, g_prefix + "DotExit" + barIdx);
+            ObjectDelete(0, g_prefix + "SigExit" + barIdx);
+         }
+      }
 
       // Get ADX + ATR buffers for range filter
       double adxBuf[];
@@ -1531,11 +1567,16 @@ int OnCalculate(const int rates_total,
          bool passRange = true;
 
          // Filter 1: ADX threshold — low ADX = ranging market
-         if(adxCopied > i && adxBuf[i] < InpADXThreshold)
+         // Block signal if ADX data not yet available (prevent ghost signals)
+         if(adxCopied <= i)
+            passRange = false;
+         else if(adxBuf[i] < InpADXThreshold)
             passRange = false;
 
          // Filter 2: Ribbon width vs ATR — narrow ribbon = chop
-         if(atrCopied > i && atrBuf[i] > 0)
+         if(atrCopied <= i)
+            passRange = false;
+         else if(atrBuf[i] > 0)
          {
             double ribbonW = MathAbs(g_ed0[i] - g_ed7[i]);
             if(ribbonW < atrBuf[i] * InpRibbonATR)
@@ -1687,7 +1728,11 @@ int OnCalculate(const int rates_total,
          if(!isTransition || passRange)
             prevMaster = nT;
       }
-      g_masterTrend = prevMaster;
+      g_masterTrend          = prevMaster;
+      g_persistPrevMaster    = prevMaster;
+      g_persistLastSignalBar = lastSignalBar;
+      g_persistLastExitBar   = lastExitBar;
+      g_persistLastCalcBar   = rates_total - 1;
 
       // Update MSS Score Panel + Trend Status Panel (moved to outside block below)
 
