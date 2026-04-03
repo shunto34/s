@@ -6,7 +6,7 @@
 //+------------------------------------------------------------------+
 #property copyright "FAD APEX"
 #property link      ""
-#property version   "4.52"
+#property version   "4.53"
 #property indicator_chart_window
 
 #property indicator_buffers 21
@@ -79,7 +79,7 @@ input int    InpSwingLookback = 10;
 input bool   InpShow5min  = true;
 input bool   InpShow15min = true;
 input bool   InpShow1H    = true;
-input int    InpTrendConfirm = 1;
+input int    InpTrendConfirm = 2;
 input bool   InpShowLevels   = true;
 input int    InpMaxLevels    = 3;
 input int    InpLevelExtend  = 50;
@@ -90,7 +90,7 @@ input int    InpADXThreshold = 18;       // ADX below this = range (suppress sig
 input double InpRibbonATR    = 0.8;      // Ribbon width must be > ATR * this ratio
 input int    InpCooldownBars = 8;        // Minimum bars between opposing signals
 input bool   InpShowExits    = true;     // Show EXIT take-profit signals
-input int    InpExitThreshold = 45;      // EXIT score threshold (0-100)
+input int    InpExitThreshold = 55;      // EXIT score threshold (0-100)
 
 //--- Ribbon buffers (7 fills x 2 = 14)
 double g_ema1[];
@@ -143,6 +143,7 @@ int g_persistPrevMaster    = 0;
 int g_persistLastSignalBar = -9999;
 int g_persistLastExitBar   = -9999;
 int g_persistLastCalcBar   = -1;
+int g_persistPendingExitScore = 0;
 
 //--- Key levels
 string g_prefix;
@@ -190,6 +191,7 @@ int OnInit()
    g_persistLastSignalBar = -9999;
    g_persistLastExitBar   = -9999;
    g_persistLastCalcBar   = -1;
+   g_persistPendingExitScore = 0;
 
    g_mtfTF[0] = PERIOD_M5;
    g_mtfTF[1] = PERIOD_M15;
@@ -715,10 +717,10 @@ int CalcExitScore(bool isBullPos, int idx, int total,
 
       double atrDev = priceDeviation / atrBuf[idx];  // ATR-normalized
 
-      if(atrDev > 1.5)      score += 30.0;
-      else if(atrDev > 1.0)  score += 22.0;
-      else if(atrDev > 0.6)  score += 15.0;
-      else if(atrDev > 0.3)  score += 8.0;
+      if(atrDev > 2.0)      score += 30.0;
+      else if(atrDev > 1.5)  score += 22.0;
+      else if(atrDev > 1.0)  score += 12.0;
+      else if(atrDev > 0.7)  score += 5.0;
    }
 
    //=== Layer 2: EMA slope reversal detection (25pt) ===
@@ -727,24 +729,26 @@ int CalcExitScore(bool isBullPos, int idx, int total,
    {
       double slopeNow  = g_ed0[idx] - g_ed0[idx - 2];
       double slopePrev = g_ed0[idx - 2] - g_ed0[idx - 4];
+      double slope8Now  = g_ed1[idx] - g_ed1[idx - 2];
 
       if(isBullPos)
       {
-         if(slopeNow <= 0)                                   score += 25.0;
-         else if(slopePrev > 0 && slopeNow < slopePrev * 0.5) score += 18.0;
-         else if(slopePrev > 0 && slopeNow < slopePrev * 0.8) score += 10.0;
+         // Both EMA5 and EMA8 reversing = strong exhaustion
+         if(slopeNow <= 0 && slope8Now <= 0)                   score += 25.0;
+         else if(slopeNow <= 0)                                 score += 10.0;
+         else if(slopePrev > 0 && slopeNow < slopePrev * 0.4)  score += 12.0;
       }
       else
       {
-         if(slopeNow >= 0)                                   score += 25.0;
-         else if(slopePrev < 0 && slopeNow > slopePrev * 0.5) score += 18.0;
-         else if(slopePrev < 0 && slopeNow > slopePrev * 0.8) score += 10.0;
+         if(slopeNow >= 0 && slope8Now >= 0)                   score += 25.0;
+         else if(slopeNow >= 0)                                 score += 10.0;
+         else if(slopePrev < 0 && slopeNow > slopePrev * 0.4)  score += 12.0;
       }
 
-      // Bonus: EMA5-EMA8 gap shrinking = ribbon tip converging
+      // Ribbon tip convergence (stricter: 40% threshold)
       double gap01     = MathAbs(g_ed0[idx] - g_ed1[idx]);
       double gap01prev = MathAbs(g_ed0[idx - 3] - g_ed1[idx - 3]);
-      if(gap01prev > 0 && gap01 < gap01prev * 0.6)
+      if(gap01prev > 0 && gap01 < gap01prev * 0.4)
          score += 5.0;
    }
 
@@ -760,10 +764,9 @@ int CalcExitScore(bool isBullPos, int idx, int total,
       bool adx2decline = (idx >= 2 && adxBuf[idx] < adxBuf[idx-1] && adxBuf[idx-1] < adxBuf[idx-2]);
       bool adx1decline = (idx >= 1 && adxBuf[idx] < adxBuf[idx-1]);
 
-      if(adxMax5 > 20.0 && adx2decline)         score += 20.0;
-      else if(adxMax5 > 20.0 && adx1decline)     score += 12.0;
-      else if(adxMax5 > 25.0 && adxNow < adxMax5 * 0.85) score += 8.0;
-      else if(adx2decline)                        score += 6.0;  // Any ADX level declining
+      if(adxMax5 > 25.0 && adx2decline)         score += 20.0;
+      else if(adxMax5 > 25.0 && adx1decline)     score += 10.0;
+      else if(adxMax5 > 30.0 && adxNow < adxMax5 * 0.80) score += 8.0;
    }
 
    //=== Layer 4: Volume climax pattern (15pt) ===
@@ -1507,19 +1510,21 @@ int OnCalculate(const int rates_total,
 
       //=== Phase 3: BULL/BEAR signals with S/A/B ranking + range filter ===
       int startSig = InpEMA8 + 10;
-      int prevMaster, lastSignalBar, lastExitBar;
+      int prevMaster, lastSignalBar, lastExitBar, pendingExitScore;
 
       if(fullRecalc)
       {
-         prevMaster    = 0;
-         lastSignalBar = -9999;
-         lastExitBar   = -9999;
+         prevMaster       = 0;
+         lastSignalBar    = -9999;
+         lastExitBar      = -9999;
+         pendingExitScore = 0;
       }
       else  // newBar: resume from persisted state
       {
-         prevMaster    = g_persistPrevMaster;
-         lastSignalBar = g_persistLastSignalBar;
-         lastExitBar   = g_persistLastExitBar;
+         prevMaster       = g_persistPrevMaster;
+         lastSignalBar    = g_persistLastSignalBar;
+         lastExitBar      = g_persistLastExitBar;
+         pendingExitScore = g_persistPendingExitScore;
          if(g_persistLastCalcBar >= startSig)
             startSig = g_persistLastCalcBar;
 
@@ -1563,28 +1568,51 @@ int OnCalculate(const int rates_total,
          else if(aBear) nT = -1;
          else nT = prevMaster;
 
-         // --- Range Filter: 3-layer check ---
-         bool passRange = true;
+         // --- Trend Initiation Filter (replaces legacy passRange) ---
+         bool passRange = false;  // Default deny — must qualify
 
-         // Filter 1: ADX threshold — low ADX = ranging market
-         // Block signal if ADX data not yet available (prevent ghost signals)
-         if(adxCopied <= i)
-            passRange = false;
-         else if(adxBuf[i] < InpADXThreshold)
-            passRange = false;
-
-         // Filter 2: Ribbon width vs ATR — narrow ribbon = chop
-         if(atrCopied <= i)
-            passRange = false;
-         else if(atrBuf[i] > 0)
+         if(adxCopied > i && atrCopied > i && i >= 3)
          {
-            double ribbonW = MathAbs(g_ed0[i] - g_ed7[i]);
-            if(ribbonW < atrBuf[i] * InpRibbonATR)
-               passRange = false;
+            double curWidth = MathAbs(g_ed0[i] - g_ed7[i]);
+
+            // PATH A: Squeeze Breakout — ribbon compressed then expanding
+            bool squeezeBO = false;
+            if(atrBuf[i] > 0)
+            {
+               double minWidth = curWidth;
+               int sqLook = MathMin(15, i - startSig);
+               for(int j = i - sqLook; j < i; j++)
+                  if(j >= 0) minWidth = MathMin(minWidth, MathAbs(g_ed0[j] - g_ed7[j]));
+               if(minWidth < atrBuf[i] * 0.4 && curWidth > minWidth * 1.5)
+                  squeezeBO = true;
+            }
+
+            // PATH B: ADX Building — directional momentum increasing from low
+            bool adxBuilding = false;
+            {
+               int adxRise = 0;
+               if(adxBuf[i] > adxBuf[i-1]) adxRise++;
+               if(adxBuf[i-1] > adxBuf[i-2]) adxRise++;
+               if(adxBuf[i-2] > adxBuf[i-3]) adxRise++;
+               if(adxRise >= 2 && adxBuf[i] > 12.0)
+                  adxBuilding = true;
+            }
+
+            // PATH C: Strong Trend — ADX already high
+            bool strongTrend = (adxBuf[i] >= InpADXThreshold + 5);
+
+            if(squeezeBO || adxBuilding || strongTrend)
+               passRange = true;
          }
 
-         // Filter 3: Anti-whipsaw cooldown — prevent rapid flipping
-         if((i - lastSignalBar) < InpCooldownBars)
+         // Anti-chop gate: EMA5/EMA8 must be on correct side of EMA21
+         if(nT == 1 && !(g_ed0[i] > g_ed3[i] && g_ed1[i] > g_ed3[i]))
+            passRange = false;
+         if(nT == -1 && !(g_ed0[i] < g_ed3[i] && g_ed1[i] < g_ed3[i]))
+            passRange = false;
+
+         // Anti-whipsaw cooldown
+         if((i - lastSignalBar) < MathMax(5, InpCooldownBars - 3))
             passRange = false;
 
          // --- Signal scoring (S/A/B rank) ---
@@ -1609,8 +1637,8 @@ int OnCalculate(const int rates_total,
                         && g_ed6[i]<g_ed7[i];
             if(perfOrder) score++;
 
-            // Factor 3: Candle momentum (body > 1.3x avg of last 20)
-            double bodySize = MathAbs(close[i] - open[i]);
+            // Factor 3: Candle momentum (directional body > 1.3x avg of last 20)
+            double dirBody = isBull ? (close[i] - open[i]) : (open[i] - close[i]);
             double avgBody = 0;
             int mLook = MathMin(20, i - startSig);
             if(mLook > 0)
@@ -1619,41 +1647,74 @@ int OnCalculate(const int rates_total,
                   avgBody += MathAbs(close[j] - open[j]);
                avgBody /= mLook;
             }
-            if(avgBody > 0 && bodySize > avgBody * 1.3) score++;
+            if(avgBody > 0 && dirBody > avgBody * 1.3) score++;
 
             // Factor 4: Ribbon squeeze expansion
-            double curWidth = MathAbs(g_ed0[i] - g_ed7[i]);
-            double minW = curWidth;
-            int sqLook = MathMin(10, i - startSig);
-            for(int j = i - sqLook; j < i; j++)
+            double curWidth2 = MathAbs(g_ed0[i] - g_ed7[i]);
+            double minW = curWidth2;
+            int sqLook2 = MathMin(10, i - startSig);
+            for(int j = i - sqLook2; j < i; j++)
                minW = MathMin(minW, MathAbs(g_ed0[j] - g_ed7[j]));
-            if(curWidth > 0 && minW < curWidth * 0.5) score++;
+            if(curWidth2 > 0 && minW < curWidth2 * 0.5) score++;
 
-            // Rank: S(3-4), A(2), B(0-1)
-            // Rank: S(3-4), A(2), B(0-1) — all ranks show dot + text
-            string rank = (score >= 3) ? "S" : (score == 2) ? "A" : "B";
+            // Factor 5: Volume confirmation (signal bar > 1.2x 20-bar avg)
+            if(i >= 20)
+            {
+               double avgVol = 0;
+               for(int j = i - 20; j < i; j++)
+                  avgVol += (double)tick_volume[j];
+               avgVol /= 20.0;
+               if(avgVol > 0 && (double)tick_volume[i] > avgVol * 1.2)
+                  score++;
+            }
+
+            // Factor 6: EMA5 slope acceleration (momentum building)
+            if(i >= 6)
+            {
+               double slopeRecent = g_ed0[i] - g_ed0[i-3];
+               double slopePrior  = g_ed0[i-3] - g_ed0[i-6];
+               if(isBull && slopeRecent > slopePrior && slopeRecent > 0)
+                  score++;
+               if(!isBull && slopeRecent < slopePrior && slopeRecent < 0)
+                  score++;
+            }
+
+            // Factor 7: Price committed beyond EMA21
+            if(isBull && close[i] > g_ed3[i]) score++;
+            if(!isBull && close[i] < g_ed3[i]) score++;
+
+            // Rank: S(5-7), A(3-4), B(0-2)
+            string rank = (score >= 5) ? "S" : (score >= 3) ? "A" : "B";
+
+            // B-rank quality gate: suppress in low-confidence conditions
+            if(rank == "B")
+            {
+               if(isBull && buCnt < 2) continue;
+               if(!isBull && beCnt < 2) continue;
+               if(adxCopied > i && adxBuf[i] < 15.0) continue;
+            }
 
             if(isBull)
             {
                g_bullSignal[i] = low[i];
-               color dotC = (score >= 3) ? C'0,255,140' : (score == 2) ? C'0,220,120' : C'0,180,100';
-               int dotSz = (score >= 3) ? 32 : 28;
-               int txtSz = (score >= 3) ? 12 : 10;
+               color dotC = (score >= 5) ? C'0,255,140' : (score >= 3) ? C'0,220,120' : C'0,180,100';
+               int dotSz = (score >= 5) ? 32 : 28;
+               int txtSz = (score >= 5) ? 12 : 10;
                CreateSignalDot("DotBull" + IntegerToString(i),
                   time[i], low[i], dotC, false, dotSz);
-               string bTxt = (score >= 3) ? "BULL \x2605" : "BULL";
+               string bTxt = (score >= 5) ? "BULL \x2605" : "BULL";
                CreateSignalLabel("SigBull" + IntegerToString(i),
                   time[i], low[i], bTxt, dotC, false, txtSz);
             }
             else
             {
                g_bearSignal[i] = high[i];
-               color dotC = (score >= 3) ? C'255,50,50' : (score == 2) ? C'255,70,70' : C'255,100,100';
-               int dotSz = (score >= 3) ? 32 : 28;
-               int txtSz = (score >= 3) ? 12 : 10;
+               color dotC = (score >= 5) ? C'255,50,50' : (score >= 3) ? C'255,70,70' : C'255,100,100';
+               int dotSz = (score >= 5) ? 32 : 28;
+               int txtSz = (score >= 5) ? 12 : 10;
                CreateSignalDot("DotBear" + IntegerToString(i),
                   time[i], high[i], dotC, true, dotSz);
-               string bTxt = (score >= 3) ? "BEAR \x2605" : "BEAR";
+               string bTxt = (score >= 5) ? "BEAR \x2605" : "BEAR";
                CreateSignalLabel("SigBear" + IntegerToString(i),
                   time[i], high[i], bTxt, dotC, true, txtSz);
             }
@@ -1665,13 +1726,13 @@ int OnCalculate(const int rates_total,
             if(i == rates_total - 1 && prev_calculated > 0 && time[i] > g_lastNotifyTime)
             {
                g_lastNotifyTime = time[i];
-               string rank = (score >= 3) ? "S" : (score == 2) ? "A" : "B";
-               SendSignalAlert(isBull ? "BULL " + rank : "BEAR " + rank, close[i]);
+               string nRank = (score >= 5) ? "S" : (score >= 3) ? "A" : "B";
+               SendSignalAlert(isBull ? "BULL " + nRank : "BEAR " + nRank, close[i]);
             }
          }
 
          //=== EXIT take-profit signal: momentum exhaustion detection ===
-         if(InpShowExits && prevMaster != 0 && (i - lastSignalBar) > 3
+         if(InpShowExits && prevMaster != 0 && (i - lastSignalBar) > 8
             && (i - lastExitBar) >= InpCooldownBars)
          {
             bool isBullPos = (prevMaster == 1);
@@ -1680,45 +1741,56 @@ int OnCalculate(const int rates_total,
                                           adxBuf, adxCopied, atrBuf, atrCopied);
             if(exitScore >= InpExitThreshold)
             {
-               lastExitBar = i;
-               bool isStrong = (exitScore >= 65);
-               color exitC = isStrong ? C'255,140,0' : C'255,200,50';
-               int eSz = isStrong ? 28 : 22;
-               int eTxtSz = isStrong ? 12 : 10;
-               string eTxt = isStrong ? "EXIT \x2605" : "EXIT";
-
-               if(isBullPos)
+               // 2-bar confirmation: require score above threshold for 2 consecutive bars
+               if(pendingExitScore >= InpExitThreshold)
                {
-                  // Exit long: marker above price
-                  CreateSignalDot("DotExit" + IntegerToString(i),
-                     time[i], high[i], exitC, true, eSz);
-                  CreateSignalLabel("SigExit" + IntegerToString(i),
-                     time[i], high[i], eTxt, exitC, true, eTxtSz);
+                  lastExitBar = i;
+                  pendingExitScore = 0;
+                  bool isStrong = (exitScore >= 70);
+                  color exitC = isStrong ? C'255,140,0' : C'255,200,50';
+                  int eSz = isStrong ? 28 : 22;
+                  int eTxtSz = isStrong ? 12 : 10;
+                  string eTxt = isStrong ? "EXIT \x2605" : "EXIT";
+
+                  if(isBullPos)
+                  {
+                     CreateSignalDot("DotExit" + IntegerToString(i),
+                        time[i], high[i], exitC, true, eSz);
+                     CreateSignalLabel("SigExit" + IntegerToString(i),
+                        time[i], high[i], eTxt, exitC, true, eTxtSz);
+                  }
+                  else
+                  {
+                     CreateSignalDot("DotExit" + IntegerToString(i),
+                        time[i], low[i], exitC, false, eSz);
+                     CreateSignalLabel("SigExit" + IntegerToString(i),
+                        time[i], low[i], eTxt, exitC, false, eTxtSz);
+                  }
+
+                  // EXIT push notification (latest bar only)
+                  if(i == rates_total - 1 && prev_calculated > 0 && time[i] > g_lastExitNotify)
+                  {
+                     g_lastExitNotify = time[i];
+                     string tfStr = EnumToString(Period());
+                     StringReplace(tfStr, "PERIOD_", "");
+                     string exitMsg = StringFormat("[%s] %s %s @ %s | %s",
+                        _Symbol, eTxt, isBullPos ? "LONG TP" : "SHORT TP",
+                        DoubleToString(close[i], _Digits), tfStr);
+                     if(InpAlertSound) PlaySound("alert.wav");
+                     Alert(exitMsg);
+                     if(InpPushNotify)
+                        SendNotification(exitMsg);
+                     Print("FAD APEX EXIT: ", exitMsg);
+                  }
                }
                else
                {
-                  // Exit short: marker below price
-                  CreateSignalDot("DotExit" + IntegerToString(i),
-                     time[i], low[i], exitC, false, eSz);
-                  CreateSignalLabel("SigExit" + IntegerToString(i),
-                     time[i], low[i], eTxt, exitC, false, eTxtSz);
+                  pendingExitScore = exitScore;  // First bar above threshold
                }
-
-               // EXIT push notification (latest bar only, M15/H1)
-               if(i == rates_total - 1 && prev_calculated > 0 && time[i] > g_lastExitNotify)
-               {
-                  g_lastExitNotify = time[i];
-                  string tfStr = EnumToString(Period());
-                  StringReplace(tfStr, "PERIOD_", "");
-                  string exitMsg = StringFormat("[%s] %s %s @ %s | %s",
-                     _Symbol, eTxt, isBullPos ? "LONG TP" : "SHORT TP",
-                     DoubleToString(close[i], _Digits), tfStr);
-                  if(InpAlertSound) PlaySound("alert.wav");
-                  Alert(exitMsg);
-                  if(InpPushNotify)
-                     SendNotification(exitMsg);
-                  Print("FAD APEX EXIT: ", exitMsg);
-               }
+            }
+            else
+            {
+               pendingExitScore = 0;  // Score dropped — reset confirmation
             }
          }
 
@@ -1730,9 +1802,10 @@ int OnCalculate(const int rates_total,
       }
       g_masterTrend          = prevMaster;
       g_persistPrevMaster    = prevMaster;
-      g_persistLastSignalBar = lastSignalBar;
-      g_persistLastExitBar   = lastExitBar;
-      g_persistLastCalcBar   = rates_total - 1;
+      g_persistLastSignalBar    = lastSignalBar;
+      g_persistLastExitBar      = lastExitBar;
+      g_persistLastCalcBar      = rates_total - 1;
+      g_persistPendingExitScore = pendingExitScore;
 
       // Update MSS Score Panel + Trend Status Panel (moved to outside block below)
 
