@@ -6,7 +6,7 @@
 //+------------------------------------------------------------------+
 #property copyright "FAD APEX"
 #property link      ""
-#property version   "4.54"
+#property version   "4.55"
 #property indicator_chart_window
 
 #property indicator_buffers 21
@@ -1645,37 +1645,36 @@ int OnCalculate(const int rates_total,
 
             bool stage1 = (s1qualify >= 2);
 
-            // ---- STAGE 2: BREAKOUT VALIDATION (ALL must be true) ----
+            // ---- STAGE 2: BREAKOUT VALIDATION (5 of 6 conditions required) ----
             bool stage2 = false;
             if(stage1 && i >= 4)
             {
+               int s2score = 0;
+
                // 2.1: ADX rising for 2+ of last 3 bars
                int adxRise = 0;
                if(adxBuf[i] > adxBuf[i-1]) adxRise++;
                if(adxBuf[i-1] > adxBuf[i-2]) adxRise++;
                if(i >= 3 && adxBuf[i-2] > adxBuf[i-3]) adxRise++;
-               bool adxRising = (adxRise >= 2);
+               if(adxRise >= 2) s2score++;
 
-               // 2.2: Ribbon expanding for 2+ bars
+               // 2.2: Ribbon expanding over 2 bars (net, not strictly monotonic)
                double w0 = MathAbs(g_ed0[i] - g_ed7[i]);
-               double w1 = MathAbs(g_ed0[i-1] - g_ed7[i-1]);
                double w2 = MathAbs(g_ed0[i-2] - g_ed7[i-2]);
-               bool ribbonExpanding = (w0 > w1 && w1 > w2);
+               if(w0 > w2) s2score++;
 
-               // 2.3: Close breaks 20-bar high (bull) or 20-bar low (bear)
-               double hi20 = high[i], lo20 = low[i];
+               // 2.3: Close breaks previous 20-bar high (bull) or low (bear)
+               double hi20 = -DBL_MAX, lo20 = DBL_MAX;
                int lvlLook = MathMin(20, i);
                for(int j = i - lvlLook; j < i; j++)
                {
                   if(high[j] > hi20) hi20 = high[j];
                   if(low[j] < lo20)  lo20 = low[j];
                }
-               bool levelBreak = false;
-               if(nT == 1 && close[i] > hi20)  levelBreak = true;
-               if(nT == -1 && close[i] < lo20) levelBreak = true;
+               if(nT == 1 && close[i] > hi20)  s2score++;
+               if(nT == -1 && close[i] < lo20) s2score++;
 
                // 2.4: Volume on signal bar >= 1.0x 20-bar average
-               bool volOK = false;
                if(i >= 20)
                {
                   double avgVol = 0;
@@ -1683,29 +1682,26 @@ int OnCalculate(const int rates_total,
                      avgVol += (double)tick_volume[j];
                   avgVol /= 20.0;
                   if(avgVol > 0 && (double)tick_volume[i] >= avgVol)
-                     volOK = true;
+                     s2score++;
                }
-               else volOK = true;
+               else s2score++;  // insufficient data → don't penalize
 
                // 2.5: EMA5 and EMA8 on correct side of EMA21
-               bool emaAlign = false;
-               if(nT == 1)
-                  emaAlign = (g_ed0[i] > g_ed3[i] && g_ed1[i] > g_ed3[i]);
-               else
-                  emaAlign = (g_ed0[i] < g_ed3[i] && g_ed1[i] < g_ed3[i]);
+               if(nT == 1 && g_ed0[i] > g_ed3[i] && g_ed1[i] > g_ed3[i])
+                  s2score++;
+               if(nT == -1 && g_ed0[i] < g_ed3[i] && g_ed1[i] < g_ed3[i])
+                  s2score++;
 
-               // 2.6: 2+ consecutive same-direction candle closes
-               bool momentum = false;
-               if(i >= 2)
+               // 2.6: 2 consecutive same-direction candle closes
+               if(i >= 1)
                {
-                  if(nT == 1)
-                     momentum = (close[i] > close[i-1] && close[i-1] > close[i-2]);
-                  else
-                     momentum = (close[i] < close[i-1] && close[i-1] < close[i-2]);
+                  if(nT == 1 && close[i] > close[i-1])
+                     s2score++;
+                  if(nT == -1 && close[i] < close[i-1])
+                     s2score++;
                }
 
-               stage2 = (adxRising && ribbonExpanding && levelBreak
-                         && volOK && emaAlign && momentum);
+               stage2 = (s2score >= 5);
             }
 
             // ---- STAGE 3: FALSE BREAKOUT REJECTION ----
@@ -1734,16 +1730,15 @@ int OnCalculate(const int rates_total,
                // 3.2: Body > 30% of range (not doji)
                bool notDoji = (range_s3 > 0 && body_s3 > range_s3 * 0.30);
 
-               // 3.3: EMA5 slope correct and not decelerating
+               // 3.3: EMA5 slope in correct direction
                bool slopeOK = false;
-               if(i >= 4)
+               if(i >= 2)
                {
-                  double slopeNow  = g_ed0[i] - g_ed0[i-2];
-                  double slopePrev = g_ed0[i-2] - g_ed0[i-4];
+                  double slopeNow = g_ed0[i] - g_ed0[i-2];
                   if(nT == 1)
-                     slopeOK = (slopeNow > 0 && slopeNow >= slopePrev * 0.5);
+                     slopeOK = (slopeNow > 0);
                   else
-                     slopeOK = (slopeNow < 0 && slopeNow <= slopePrev * 0.5);
+                     slopeOK = (slopeNow < 0);
                }
 
                stage3 = (noRejection && notDoji && slopeOK);
