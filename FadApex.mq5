@@ -6,7 +6,7 @@
 //+------------------------------------------------------------------+
 #property copyright "FAD APEX"
 #property link      ""
-#property version   "4.53"
+#property version   "4.54"
 #property indicator_chart_window
 
 #property indicator_buffers 21
@@ -824,6 +824,35 @@ int CalcExitScore(bool isBullPos, int idx, int total,
       }
    }
 
+   //=== Layer 6: Regime Transition Detection (15pt) ===
+   if(idx >= 25 && atrCnt > idx)
+   {
+      double sumNow2 = 0, sqNow2 = 0;
+      for(int j = idx - 9; j <= idx; j++)
+      {
+         sumNow2 += atrBuf[j];
+         sqNow2  += atrBuf[j] * atrBuf[j];
+      }
+      double meanNow2 = sumNow2 / 10.0;
+      double varNow2  = (sqNow2 / 10.0) - (meanNow2 * meanNow2);
+      double cvNow2 = (meanNow2 > 0 && varNow2 > 0) ? MathSqrt(varNow2) / meanNow2 : 0;
+
+      double sumPrev2 = 0, sqPrev2 = 0;
+      for(int j = idx - 19; j <= idx - 10; j++)
+      {
+         sumPrev2 += atrBuf[j];
+         sqPrev2  += atrBuf[j] * atrBuf[j];
+      }
+      double meanPrev2 = sumPrev2 / 10.0;
+      double varPrev2  = (sqPrev2 / 10.0) - (meanPrev2 * meanPrev2);
+      double cvPrev2 = (meanPrev2 > 0 && varPrev2 > 0) ? MathSqrt(varPrev2) / meanPrev2 : 0;
+
+      if(cvPrev2 < 0.20 && cvNow2 >= 0.25)
+         score += 15.0;
+      else if(cvNow2 > cvPrev2 * 1.5 && cvNow2 >= 0.20)
+         score += 8.0;
+   }
+
    int finalScore = (int)MathMin(100.0, MathMax(0.0, score));
    return(finalScore);
 }
@@ -1551,6 +1580,22 @@ int OnCalculate(const int rates_total,
 
       for(int i = startSig; i < rates_total; i++)
       {
+         // === ATR Coefficient of Variation (regime detection) ===
+         double atrCV = 0.5;  // default = ranging
+         if(atrCopied > i && i >= 20)
+         {
+            double sumATR = 0, sqATR = 0;
+            for(int j = i - 19; j <= i; j++)
+            {
+               sumATR += atrBuf[j];
+               sqATR  += atrBuf[j] * atrBuf[j];
+            }
+            double meanATR = sumATR / 20.0;
+            double varATR  = (sqATR / 20.0) - (meanATR * meanATR);
+            if(meanATR > 0 && varATR > 0)
+               atrCV = MathSqrt(varATR) / meanATR;
+         }
+
          int buCnt = 0, beCnt = 0;
          if((int)g_barTrend0[i] == 1)  buCnt++;
          if((int)g_barTrend0[i] == -1) beCnt++;
@@ -1568,55 +1613,151 @@ int OnCalculate(const int rates_total,
          else if(aBear) nT = -1;
          else nT = prevMaster;
 
-         // --- Trend Initiation Filter (replaces legacy passRange) ---
-         bool passRange = false;  // Default deny — must qualify
+         // === 3-STAGE GATE: Range Confirm → Breakout Validate → False BO Reject ===
+         bool passGate = false;
 
-         if(adxCopied > i && atrCopied > i && i >= 3)
+         if(adxCopied > i && atrCopied > i && i >= 30)
          {
-            double curWidth = MathAbs(g_ed0[i] - g_ed7[i]);
+            // ---- STAGE 1: RANGE CONFIRMATION ----
+            int s1qualify = 0;
 
-            // PATH A: Squeeze Breakout — ribbon compressed then expanding
-            bool squeezeBO = false;
-            if(atrBuf[i] > 0)
+            // 1A: ADX was below 20 for 5+ of the last 20 bars
+            int lowADXcount = 0;
+            for(int j = i - 19; j <= i; j++)
+               if(j >= 0 && j < adxCopied && adxBuf[j] < 20.0) lowADXcount++;
+            if(lowADXcount >= 5) s1qualify++;
+
+            // 1B: Ribbon was compressed (< ATR * 0.5) for 5+ of the last 30 bars
+            int compressedCount = 0;
+            int s1bLook = MathMin(30, i);
+            for(int j = i - s1bLook; j <= i; j++)
             {
-               double minWidth = curWidth;
-               int sqLook = MathMin(15, i - startSig);
-               for(int j = i - sqLook; j < i; j++)
-                  if(j >= 0) minWidth = MathMin(minWidth, MathAbs(g_ed0[j] - g_ed7[j]));
-               if(minWidth < atrBuf[i] * 0.4 && curWidth > minWidth * 1.5)
-                  squeezeBO = true;
+               if(j >= 0 && atrBuf[j] > 0)
+               {
+                  double w = MathAbs(g_ed0[j] - g_ed7[j]);
+                  if(w < atrBuf[j] * 0.5) compressedCount++;
+               }
             }
+            if(compressedCount >= 5) s1qualify++;
 
-            // PATH B: ADX Building — directional momentum increasing from low
-            bool adxBuilding = false;
+            // 1C: ATR CV >= 0.20 (ranging regime)
+            if(atrCV >= 0.20) s1qualify++;
+
+            bool stage1 = (s1qualify >= 2);
+
+            // ---- STAGE 2: BREAKOUT VALIDATION (ALL must be true) ----
+            bool stage2 = false;
+            if(stage1 && i >= 4)
             {
+               // 2.1: ADX rising for 2+ of last 3 bars
                int adxRise = 0;
                if(adxBuf[i] > adxBuf[i-1]) adxRise++;
                if(adxBuf[i-1] > adxBuf[i-2]) adxRise++;
-               if(adxBuf[i-2] > adxBuf[i-3]) adxRise++;
-               if(adxRise >= 2 && adxBuf[i] > 12.0)
-                  adxBuilding = true;
+               if(i >= 3 && adxBuf[i-2] > adxBuf[i-3]) adxRise++;
+               bool adxRising = (adxRise >= 2);
+
+               // 2.2: Ribbon expanding for 2+ bars
+               double w0 = MathAbs(g_ed0[i] - g_ed7[i]);
+               double w1 = MathAbs(g_ed0[i-1] - g_ed7[i-1]);
+               double w2 = MathAbs(g_ed0[i-2] - g_ed7[i-2]);
+               bool ribbonExpanding = (w0 > w1 && w1 > w2);
+
+               // 2.3: Close breaks 20-bar high (bull) or 20-bar low (bear)
+               double hi20 = high[i], lo20 = low[i];
+               int lvlLook = MathMin(20, i);
+               for(int j = i - lvlLook; j < i; j++)
+               {
+                  if(high[j] > hi20) hi20 = high[j];
+                  if(low[j] < lo20)  lo20 = low[j];
+               }
+               bool levelBreak = false;
+               if(nT == 1 && close[i] > hi20)  levelBreak = true;
+               if(nT == -1 && close[i] < lo20) levelBreak = true;
+
+               // 2.4: Volume on signal bar >= 1.0x 20-bar average
+               bool volOK = false;
+               if(i >= 20)
+               {
+                  double avgVol = 0;
+                  for(int j = i - 20; j < i; j++)
+                     avgVol += (double)tick_volume[j];
+                  avgVol /= 20.0;
+                  if(avgVol > 0 && (double)tick_volume[i] >= avgVol)
+                     volOK = true;
+               }
+               else volOK = true;
+
+               // 2.5: EMA5 and EMA8 on correct side of EMA21
+               bool emaAlign = false;
+               if(nT == 1)
+                  emaAlign = (g_ed0[i] > g_ed3[i] && g_ed1[i] > g_ed3[i]);
+               else
+                  emaAlign = (g_ed0[i] < g_ed3[i] && g_ed1[i] < g_ed3[i]);
+
+               // 2.6: 2+ consecutive same-direction candle closes
+               bool momentum = false;
+               if(i >= 2)
+               {
+                  if(nT == 1)
+                     momentum = (close[i] > close[i-1] && close[i-1] > close[i-2]);
+                  else
+                     momentum = (close[i] < close[i-1] && close[i-1] < close[i-2]);
+               }
+
+               stage2 = (adxRising && ribbonExpanding && levelBreak
+                         && volOK && emaAlign && momentum);
             }
 
-            // PATH C: Strong Trend — ADX already high
-            bool strongTrend = (adxBuf[i] >= InpADXThreshold + 5);
+            // ---- STAGE 3: FALSE BREAKOUT REJECTION ----
+            bool stage3 = false;
+            if(stage1 && stage2)
+            {
+               double range_s3 = high[i] - low[i];
+               double body_s3  = MathAbs(close[i] - open[i]);
 
-            if(squeezeBO || adxBuilding || strongTrend)
-               passRange = true;
+               // 3.1: No rejection candle
+               bool noRejection = true;
+               if(range_s3 > 0)
+               {
+                  if(nT == 1)
+                  {
+                     double upperWick = high[i] - MathMax(close[i], open[i]);
+                     if(upperWick > range_s3 * 0.50) noRejection = false;
+                  }
+                  else
+                  {
+                     double lowerWick = MathMin(close[i], open[i]) - low[i];
+                     if(lowerWick > range_s3 * 0.50) noRejection = false;
+                  }
+               }
+
+               // 3.2: Body > 30% of range (not doji)
+               bool notDoji = (range_s3 > 0 && body_s3 > range_s3 * 0.30);
+
+               // 3.3: EMA5 slope correct and not decelerating
+               bool slopeOK = false;
+               if(i >= 4)
+               {
+                  double slopeNow  = g_ed0[i] - g_ed0[i-2];
+                  double slopePrev = g_ed0[i-2] - g_ed0[i-4];
+                  if(nT == 1)
+                     slopeOK = (slopeNow > 0 && slopeNow >= slopePrev * 0.5);
+                  else
+                     slopeOK = (slopeNow < 0 && slopeNow <= slopePrev * 0.5);
+               }
+
+               stage3 = (noRejection && notDoji && slopeOK);
+            }
+
+            passGate = (stage1 && stage2 && stage3);
          }
 
-         // Anti-chop gate: EMA5/EMA8 must be on correct side of EMA21
-         if(nT == 1 && !(g_ed0[i] > g_ed3[i] && g_ed1[i] > g_ed3[i]))
-            passRange = false;
-         if(nT == -1 && !(g_ed0[i] < g_ed3[i] && g_ed1[i] < g_ed3[i]))
-            passRange = false;
-
-         // Anti-whipsaw cooldown
-         if((i - lastSignalBar) < MathMax(5, InpCooldownBars - 3))
-            passRange = false;
+         // Cooldown
+         if((i - lastSignalBar) < InpCooldownBars)
+            passGate = false;
 
          // --- Signal scoring (S/A/B rank) ---
-         if(passRange && ((nT == 1 && prevMaster != 1) || (nT == -1 && prevMaster != -1)))
+         if(passGate && ((nT == 1 && prevMaster != 1) || (nT == -1 && prevMaster != -1)))
          {
             int score = 0;
             bool isBull = (nT == 1);
@@ -1797,7 +1938,7 @@ int OnCalculate(const int rates_total,
          // Only update master trend when signal actually fires or no transition
          // If range filter blocked a transition, keep prevMaster so signal retries later
          bool isTransition = (nT == 1 && prevMaster != 1) || (nT == -1 && prevMaster != -1);
-         if(!isTransition || passRange)
+         if(!isTransition || passGate)
             prevMaster = nT;
       }
       g_masterTrend          = prevMaster;
