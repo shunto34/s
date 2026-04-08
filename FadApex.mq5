@@ -1577,22 +1577,28 @@ int OnCalculate(const int rates_total,
          if((i - lastSignalBar) < InpCooldownBars)
             passRange = false;
 
-         // Filter 3: DI separation — directional dominance
+         // Filter 3: DI separation — directional dominance (relative threshold)
          // Range: DI+ ≈ DI- (balanced oscillation). Trend: one dominates.
+         // Relative threshold adapts across instruments (GOLD vs EURGBP).
          if(diPCopied > i && diMCopied > i)
          {
-            double diSep = MathAbs(diPlusBuf[i] - diMinusBuf[i]);
-            if(diSep < 5.0)
+            double diP = diPlusBuf[i];
+            double diM = diMinusBuf[i];
+            double diSep = MathAbs(diP - diM);
+            double diMax = MathMax(diP, diM);
+            if(diMax > 0 && diSep < diMax * 0.30)
                passRange = false;
-            // Also verify direction matches signal
-            if(nT == 1 && diPlusBuf[i] <= diMinusBuf[i])
+            // Direction must match signal
+            if(nT == 1 && diP <= diM)
                passRange = false;
-            if(nT == -1 && diMinusBuf[i] <= diPlusBuf[i])
+            if(nT == -1 && diM <= diP)
                passRange = false;
          }
 
          // Filter 4: ATR Coefficient of Variation — regime stability
          // Range: ATR varies wildly (CV > 0.30). Trend: ATR stable (CV < 0.30).
+         // Breakout override: if current ATR > 1.5x mean, bypass CV filter
+         // (genuine breakout from range spikes ATR while CV is still high).
          if(atrCopied > i && i >= 20)
          {
             double sumATR = 0, sqATR = 0;
@@ -1606,7 +1612,8 @@ int OnCalculate(const int rates_total,
             if(meanATR > 0 && varATR > 0)
             {
                double atrCV = MathSqrt(varATR) / meanATR;
-               if(atrCV > 0.30)
+               bool isBreakout = (atrBuf[i] > meanATR * 1.5);
+               if(atrCV > 0.30 && !isBreakout)
                   passRange = false;
             }
          }
