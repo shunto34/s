@@ -6,7 +6,7 @@
 //+------------------------------------------------------------------+
 #property copyright "FAD APEX"
 #property link      ""
-#property version   "4.56"
+#property version   "4.57"
 #property indicator_chart_window
 
 #property indicator_buffers 21
@@ -1587,6 +1587,23 @@ int OnCalculate(const int rates_total,
             passRange = false;
          if(nT == -1 && !(g_ed0[i] < g_ed3[i] && g_ed1[i] < g_ed3[i]))
             passRange = false;
+
+         // Filter 5: EMA fan — first 3 EMAs must be in directional order
+         // Range: EMAs tangled/crossing. Trend: EMAs fan out in order.
+         if(nT == 1 && !(g_ed0[i] > g_ed1[i] && g_ed1[i] > g_ed2[i]))
+            passRange = false;
+         if(nT == -1 && !(g_ed0[i] < g_ed1[i] && g_ed1[i] < g_ed2[i]))
+            passRange = false;
+
+         // Filter 6: Ribbon actively expanding — width must be growing
+         // Range: ribbon stays flat/oscillates. Trend: ribbon fans out.
+         if(i >= 3)
+         {
+            double wNow  = MathAbs(g_ed0[i] - g_ed7[i]);
+            double wPrev = MathAbs(g_ed0[i-3] - g_ed7[i-3]);
+            if(wNow <= wPrev)
+               passRange = false;
+         }
 
          // --- Signal scoring (S/A/B rank) ---
          if(passRange && ((nT == 1 && prevMaster != 1) || (nT == -1 && prevMaster != -1)))
