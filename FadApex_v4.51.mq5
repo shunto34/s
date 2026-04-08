@@ -83,7 +83,7 @@ input int    InpTrendConfirm = 1;
 input bool   InpShowLevels   = true;
 input int    InpMaxLevels    = 3;
 input int    InpLevelExtend  = 50;
-input bool   InpPushNotify   = false;
+input bool   InpPushNotify   = true;
 input bool   InpAlertSound   = true;
 input int    InpADXPeriod    = 14;       // ADX period for range filter
 input int    InpADXThreshold = 18;       // ADX below this = range (suppress signal)
@@ -148,7 +148,9 @@ string g_loNames[];
 //--- Push notification duplicate prevention
 datetime g_lastNotifyTime    = 0;
 datetime g_lastExitNotify    = 0;
-datetime g_lastMSSNotify     = 0;
+datetime g_lastMSSNotify0    = 0;   // BOS/MSS duplicate prevention per TF
+datetime g_lastMSSNotify1    = 0;
+datetime g_lastMSSNotify2    = 0;
 
 //--- Trend Status Panel handles (M5/M15/H1/H4)
 ENUM_TIMEFRAMES g_trendTF[4];
@@ -1367,26 +1369,38 @@ void ProcessHTF(int tfIdx, int lb,
                   chartTime[i], chartHigh[i],
                   "M", C'255,80,150', true);
 
-            // MSS/BOS push notification (latest bars only, M15/H1)
-            if(!fullRecalc && i >= chartTotal - 3 && chartTime[i] > g_lastMSSNotify)
+            // MSS/BOS push notification (latest bars only, per-TF duplicate prevention)
+            // Get per-TF last notify time
+            datetime lastMSS = (tfIdx == 0) ? g_lastMSSNotify0 : (tfIdx == 1) ? g_lastMSSNotify1 : g_lastMSSNotify2;
+            if(!fullRecalc && i >= chartTotal - 3 && chartTime[i] > lastMSS)
             {
-               string mssType = "";
-               if(mBu)      mssType = "MSS Bull";
-               else if(mBe) mssType = "MSS Bear";
-               else if(bBu) mssType = "BOS Bull";
-               else if(bBe) mssType = "BOS Bear";
+               // Notify ALL events on this bar (not just first one)
+               string mssTypes[];
+               int mssCount = 0;
+               ArrayResize(mssTypes, 4);
+               if(mBu) { mssTypes[mssCount] = "MSS Bull"; mssCount++; }
+               if(mBe) { mssTypes[mssCount] = "MSS Bear"; mssCount++; }
+               if(bBu) { mssTypes[mssCount] = "BOS Bull"; mssCount++; }
+               if(bBe) { mssTypes[mssCount] = "BOS Bear"; mssCount++; }
 
-               if(mssType != "")
+               if(mssCount > 0)
                {
-                  g_lastMSSNotify = chartTime[i];
+                  // Update per-TF timestamp
+                  if(tfIdx == 0) g_lastMSSNotify0 = chartTime[i];
+                  else if(tfIdx == 1) g_lastMSSNotify1 = chartTime[i];
+                  else g_lastMSSNotify2 = chartTime[i];
+
                   string tfStr2 = EnumToString(Period());
                   StringReplace(tfStr2, "PERIOD_", "");
-                  string mssMsg = StringFormat("[%s] %s %s | %s",
-                     _Symbol, mssType, tfName, tfStr2);
-                  Alert(mssMsg);
-                  if(InpPushNotify)
-                     SendNotification(mssMsg);
-                  Print("FAD APEX MSS: ", mssMsg);
+                  for(int m = 0; m < mssCount; m++)
+                  {
+                     string mssMsg = StringFormat("[%s] %s %s | %s",
+                        _Symbol, mssTypes[m], tfName, tfStr2);
+                     Alert(mssMsg);
+                     if(InpPushNotify)
+                        SendNotification(mssMsg);
+                     Print("FAD APEX MSS: ", mssMsg);
+                  }
                }
             }
          }
