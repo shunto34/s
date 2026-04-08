@@ -6,7 +6,7 @@
 //+------------------------------------------------------------------+
 #property copyright "FAD APEX"
 #property link      ""
-#property version   "4.59"
+#property version   "4.60"
 #property indicator_chart_window
 
 #property indicator_buffers 21
@@ -86,7 +86,7 @@ input int    InpLevelExtend  = 50;
 input bool   InpPushNotify   = false;
 input bool   InpAlertSound   = true;
 input int    InpADXPeriod    = 14;       // ADX period for range filter
-input int    InpADXThreshold = 18;       // ADX below this = range (suppress signal)
+input int    InpADXThreshold = 20;       // ADX below this = range (suppress signal)
 input double InpRibbonATR    = 0.8;      // Ribbon width must be > ATR * this ratio
 input int    InpCooldownBars = 8;        // Minimum bars between opposing signals
 input bool   InpShowExits    = true;     // Show EXIT take-profit signals
@@ -143,6 +143,9 @@ int g_persistPrevMaster    = 0;
 int g_persistLastSignalBar = -9999;
 int g_persistLastExitBar   = -9999;
 int g_persistLastCalcBar   = -1;
+int g_persistBlockedCount  = 0;
+int g_persistPrevRawNT     = 0;
+int g_persistNTStableCount = 0;
 
 //--- Key levels
 string g_prefix;
@@ -190,6 +193,9 @@ int OnInit()
    g_persistLastSignalBar = -9999;
    g_persistLastExitBar   = -9999;
    g_persistLastCalcBar   = -1;
+   g_persistBlockedCount  = 0;
+   g_persistPrevRawNT     = 0;
+   g_persistNTStableCount = 0;
 
    g_mtfTF[0] = PERIOD_M5;
    g_mtfTF[1] = PERIOD_M15;
@@ -1508,18 +1514,25 @@ int OnCalculate(const int rates_total,
       //=== Phase 3: BULL/BEAR signals with S/A/B ranking + range filter ===
       int startSig = InpEMA8 + 10;
       int prevMaster, lastSignalBar, lastExitBar;
+      int blockedCount, prevRawNT, nTStableCount;
 
       if(fullRecalc)
       {
          prevMaster       = 0;
          lastSignalBar    = -9999;
          lastExitBar      = -9999;
+         blockedCount     = 0;
+         prevRawNT        = 0;
+         nTStableCount    = 0;
       }
       else  // newBar: resume from persisted state
       {
          prevMaster       = g_persistPrevMaster;
          lastSignalBar    = g_persistLastSignalBar;
          lastExitBar      = g_persistLastExitBar;
+         blockedCount     = g_persistBlockedCount;
+         prevRawNT        = g_persistPrevRawNT;
+         nTStableCount    = g_persistNTStableCount;
          if(g_persistLastCalcBar >= startSig)
             startSig = g_persistLastCalcBar;
 
@@ -1561,10 +1574,24 @@ int OnCalculate(const int rates_total,
          bool aBull = (buCnt >= InpTrendConfirm) && rBull;
          bool aBear = (beCnt >= InpTrendConfirm) && !rBull;
 
+         // Raw direction from HTF alignment
+         int rawNT;
+         if(aBull) rawNT = 1;
+         else if(aBear) rawNT = -1;
+         else rawNT = prevMaster;
+
+         // Stability: require 2+ consecutive bars of same rawNT before accepting
+         if(rawNT == prevRawNT)
+            nTStableCount++;
+         else
+            nTStableCount = 1;
+         prevRawNT = rawNT;
+
          int nT;
-         if(aBull) nT = 1;
-         else if(aBear) nT = -1;
-         else nT = prevMaster;
+         if(nTStableCount >= 2)
+            nT = rawNT;
+         else
+            nT = prevMaster;  // Not stable yet, keep previous direction
 
          // === Range Filter: Regime Detection ===
          bool passRange = true;
@@ -1597,8 +1624,7 @@ int OnCalculate(const int rates_total,
 
          // Filter 4: ATR Coefficient of Variation — regime stability
          // Range: ATR varies wildly (CV > 0.30). Trend: ATR stable (CV < 0.30).
-         // Breakout override: if current ATR > 1.5x mean, bypass CV filter
-         // (genuine breakout from range spikes ATR while CV is still high).
+         // Breakout override: ATR > 2.0x mean AND DI separation > 50%
          if(atrCopied > i && i >= 20)
          {
             double sumATR = 0, sqATR = 0;
@@ -1612,7 +1638,16 @@ int OnCalculate(const int rates_total,
             if(meanATR > 0 && varATR > 0)
             {
                double atrCV = MathSqrt(varATR) / meanATR;
-               bool isBreakout = (atrBuf[i] > meanATR * 1.5);
+               // Breakout override: ATR 2.0x AND strong DI separation (50%)
+               // Range swings can spike ATR 1.5x but not 2.0x with DI dominance
+               bool isBreakout = false;
+               if(atrBuf[i] > meanATR * 2.0 && diPCopied > i && diMCopied > i)
+               {
+                  double boDiP = diPlusBuf[i], boDiM = diMinusBuf[i];
+                  double boMax = MathMax(boDiP, boDiM);
+                  if(boMax > 0 && MathAbs(boDiP - boDiM) > boMax * 0.50)
+                     isBreakout = true;
+               }
                if(atrCV > 0.30 && !isBreakout)
                   passRange = false;
             }
@@ -1757,17 +1792,38 @@ int OnCalculate(const int rates_total,
             }
          }
 
-         // Only update master trend when signal actually fires or no transition
-         // If range filter blocked a transition, keep prevMaster so signal retries later
+         // Update master trend with retry limit (max 3 bars)
+         // If filter blocks a transition for 3 consecutive bars, consume it
          bool isTransition = (nT == 1 && prevMaster != 1) || (nT == -1 && prevMaster != -1);
-         if(!isTransition || passRange)
+         if(!isTransition)
+         {
             prevMaster = nT;
+            blockedCount = 0;
+         }
+         else if(passRange)
+         {
+            prevMaster = nT;   // Signal fired, consume transition
+            blockedCount = 0;
+         }
+         else
+         {
+            blockedCount++;
+            if(blockedCount >= 3)
+            {
+               prevMaster = nT;   // Give up after 3 bars - consume transition
+               blockedCount = 0;
+            }
+            // else: keep prevMaster unchanged, allow retry (max 2 more bars)
+         }
       }
       g_masterTrend          = prevMaster;
       g_persistPrevMaster    = prevMaster;
       g_persistLastSignalBar    = lastSignalBar;
       g_persistLastExitBar      = lastExitBar;
       g_persistLastCalcBar      = rates_total - 1;
+      g_persistBlockedCount     = blockedCount;
+      g_persistPrevRawNT        = prevRawNT;
+      g_persistNTStableCount    = nTStableCount;
 
       // Update MSS Score Panel + Trend Status Panel (moved to outside block below)
 
