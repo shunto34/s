@@ -6,7 +6,7 @@
 //+------------------------------------------------------------------+
 #property copyright "FAD APEX"
 #property link      ""
-#property version   "4.58"
+#property version   "4.59"
 #property indicator_chart_window
 
 #property indicator_buffers 21
@@ -1536,12 +1536,15 @@ int OnCalculate(const int rates_total,
          }
       }
 
-      // Get ADX + ATR buffers for range filter
-      double adxBuf[];
-      double atrBuf[];
+      // Get ADX + DI + ATR buffers for range filter
+      double adxBuf[], diPlusBuf[], diMinusBuf[], atrBuf[];
       ArraySetAsSeries(adxBuf, false);
+      ArraySetAsSeries(diPlusBuf, false);
+      ArraySetAsSeries(diMinusBuf, false);
       ArraySetAsSeries(atrBuf, false);
       int adxCopied = CopyBuffer(g_hADX, 0, 0, rates_total, adxBuf);
+      int diPCopied = CopyBuffer(g_hADX, 1, 0, rates_total, diPlusBuf);
+      int diMCopied = CopyBuffer(g_hADX, 2, 0, rates_total, diMinusBuf);
       int atrCopied = CopyBuffer(g_hChartATR, 0, 0, rates_total, atrBuf);
 
       for(int i = startSig; i < rates_total; i++)
@@ -1563,49 +1566,57 @@ int OnCalculate(const int rates_total,
          else if(aBear) nT = -1;
          else nT = prevMaster;
 
-         // --- Range Filter: 4-layer check ---
+         // === Range Filter: Regime Detection ===
          bool passRange = true;
 
-         // Filter 1: ADX threshold — low ADX = ranging market
+         // Filter 1: ADX threshold — minimum directional momentum
          if(adxCopied > i && adxBuf[i] < InpADXThreshold)
             passRange = false;
 
-         // Filter 2: Ribbon width vs ATR — narrow ribbon = chop
-         if(atrCopied > i && atrBuf[i] > 0)
-         {
-            double ribbonW = MathAbs(g_ed0[i] - g_ed7[i]);
-            if(ribbonW < atrBuf[i] * InpRibbonATR)
-               passRange = false;
-         }
-
-         // Filter 3: Anti-whipsaw cooldown — prevent rapid flipping
+         // Filter 2: Anti-whipsaw cooldown
          if((i - lastSignalBar) < InpCooldownBars)
             passRange = false;
 
-         // Filter 4: 4-EMA fan — EMA5 > EMA8 > EMA13 > EMA21 in order
-         // Range: EMAs tangled, constantly crossing. Trend: EMAs fan out cleanly.
-         // Requiring 4 EMAs in order is very hard to achieve in a range.
+         // Filter 3: DI separation — directional dominance
+         // Range: DI+ ≈ DI- (balanced oscillation). Trend: one dominates.
+         if(diPCopied > i && diMCopied > i)
+         {
+            double diSep = MathAbs(diPlusBuf[i] - diMinusBuf[i]);
+            if(diSep < 5.0)
+               passRange = false;
+            // Also verify direction matches signal
+            if(nT == 1 && diPlusBuf[i] <= diMinusBuf[i])
+               passRange = false;
+            if(nT == -1 && diMinusBuf[i] <= diPlusBuf[i])
+               passRange = false;
+         }
+
+         // Filter 4: ATR Coefficient of Variation — regime stability
+         // Range: ATR varies wildly (CV > 0.30). Trend: ATR stable (CV < 0.30).
+         if(atrCopied > i && i >= 20)
+         {
+            double sumATR = 0, sqATR = 0;
+            for(int j = i - 19; j <= i; j++)
+            {
+               sumATR += atrBuf[j];
+               sqATR  += atrBuf[j] * atrBuf[j];
+            }
+            double meanATR = sumATR / 20.0;
+            double varATR  = (sqATR / 20.0) - (meanATR * meanATR);
+            if(meanATR > 0 && varATR > 0)
+            {
+               double atrCV = MathSqrt(varATR) / meanATR;
+               if(atrCV > 0.30)
+                  passRange = false;
+            }
+         }
+
+         // Filter 5: EMA fan — first 4 EMAs in directional order
+         // Range: EMAs tangled. Trend: EMAs fan out cleanly.
          if(nT == 1 && !(g_ed0[i] > g_ed1[i] && g_ed1[i] > g_ed2[i] && g_ed2[i] > g_ed3[i]))
             passRange = false;
          if(nT == -1 && !(g_ed0[i] < g_ed1[i] && g_ed1[i] < g_ed2[i] && g_ed2[i] < g_ed3[i]))
             passRange = false;
-
-         // Filter 5: ADX must be rising — directional momentum building
-         // Range: ADX flat/declining. Trend start: ADX rises from low.
-         if(adxCopied > i && i >= 2 && adxBuf[i] <= adxBuf[i-2])
-            passRange = false;
-
-         // Filter 6: Ribbon squeeze breakout — width > 1.5x minimum of last 10 bars
-         // Range: ribbon stays compressed. Trend: ribbon expands beyond recent compression.
-         if(i >= 10)
-         {
-            double wNow = MathAbs(g_ed0[i] - g_ed7[i]);
-            double wMin = wNow;
-            for(int j = i - 10; j < i; j++)
-               wMin = MathMin(wMin, MathAbs(g_ed0[j] - g_ed7[j]));
-            if(wNow < wMin * 1.5)
-               passRange = false;
-         }
 
          // --- Signal scoring (S/A/B rank) ---
          if(passRange && ((nT == 1 && prevMaster != 1) || (nT == -1 && prevMaster != -1)))
