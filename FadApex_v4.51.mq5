@@ -1610,11 +1610,11 @@ int OnCalculate(const int rates_total,
             {
                g_bullSignal[i] = low[i];
                color dotC = (score >= 3) ? C'0,255,140' : (score == 2) ? C'0,220,120' : C'0,180,100';
-               int dotSz = (score >= 3) ? 32 : 28;
-               int txtSz = (score >= 3) ? 12 : 10;
+               int dotSz = (score >= 3) ? 32 : (score == 2) ? 28 : 24;
+               int txtSz = (score >= 3) ? 12 : (score == 2) ? 10 : 9;
                CreateSignalDot("DotBull" + IntegerToString(i),
                   time[i], low[i], dotC, false, dotSz);
-               string bTxt = (score >= 3) ? "BULL \x2605" : "BULL";
+               string bTxt = (score >= 3) ? "BULL S \x2605" : (score == 2) ? "BULL A" : "BULL B";
                CreateSignalLabel("SigBull" + IntegerToString(i),
                   time[i], low[i], bTxt, dotC, false, txtSz);
             }
@@ -1622,11 +1622,11 @@ int OnCalculate(const int rates_total,
             {
                g_bearSignal[i] = high[i];
                color dotC = (score >= 3) ? C'255,50,50' : (score == 2) ? C'255,70,70' : C'255,100,100';
-               int dotSz = (score >= 3) ? 32 : 28;
-               int txtSz = (score >= 3) ? 12 : 10;
+               int dotSz = (score >= 3) ? 32 : (score == 2) ? 28 : 24;
+               int txtSz = (score >= 3) ? 12 : (score == 2) ? 10 : 9;
                CreateSignalDot("DotBear" + IntegerToString(i),
                   time[i], high[i], dotC, true, dotSz);
-               string bTxt = (score >= 3) ? "BEAR \x2605" : "BEAR";
+               string bTxt = (score >= 3) ? "BEAR S \x2605" : (score == 2) ? "BEAR A" : "BEAR B";
                CreateSignalLabel("SigBear" + IntegerToString(i),
                   time[i], high[i], bTxt, dotC, true, txtSz);
             }
