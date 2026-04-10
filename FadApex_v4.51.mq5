@@ -1615,8 +1615,9 @@ int OnCalculate(const int rates_total,
                CreateSignalDot("DotBull" + IntegerToString(i),
                   time[i], low[i], dotC, false, dotSz);
                string bTxt = (score >= 3) ? "BULL S \x2605" : (score == 2) ? "BULL A" : "BULL B";
+               double lblOfs = (atrCopied > i && atrBuf[i] > 0) ? atrBuf[i] * 0.5 : 0;
                CreateSignalLabel("SigBull" + IntegerToString(i),
-                  time[i], low[i], bTxt, dotC, false, txtSz);
+                  time[i], low[i] - lblOfs, bTxt, dotC, false, txtSz);
             }
             else
             {
@@ -1627,8 +1628,9 @@ int OnCalculate(const int rates_total,
                CreateSignalDot("DotBear" + IntegerToString(i),
                   time[i], high[i], dotC, true, dotSz);
                string bTxt = (score >= 3) ? "BEAR S \x2605" : (score == 2) ? "BEAR A" : "BEAR B";
+               double lblOfs = (atrCopied > i && atrBuf[i] > 0) ? atrBuf[i] * 0.5 : 0;
                CreateSignalLabel("SigBear" + IntegerToString(i),
-                  time[i], high[i], bTxt, dotC, true, txtSz);
+                  time[i], high[i] + lblOfs, bTxt, dotC, true, txtSz);
             }
 
             lastSignalBar = i;  // Update anti-whipsaw tracker
@@ -1660,13 +1662,14 @@ int OnCalculate(const int rates_total,
                int eTxtSz = isStrong ? 12 : 10;
                string eTxt = isStrong ? "EXIT \x2605" : "EXIT";
 
+               double lblOfs = (atrCopied > i && atrBuf[i] > 0) ? atrBuf[i] * 0.5 : 0;
                if(isBullPos)
                {
                   // Exit long: marker above price
                   CreateSignalDot("DotExit" + IntegerToString(i),
                      time[i], high[i], exitC, true, eSz);
                   CreateSignalLabel("SigExit" + IntegerToString(i),
-                     time[i], high[i], eTxt, exitC, true, eTxtSz);
+                     time[i], high[i] + lblOfs, eTxt, exitC, true, eTxtSz);
                }
                else
                {
@@ -1674,7 +1677,7 @@ int OnCalculate(const int rates_total,
                   CreateSignalDot("DotExit" + IntegerToString(i),
                      time[i], low[i], exitC, false, eSz);
                   CreateSignalLabel("SigExit" + IntegerToString(i),
-                     time[i], low[i], eTxt, exitC, false, eTxtSz);
+                     time[i], low[i] - lblOfs, eTxt, exitC, false, eTxtSz);
                }
 
                // EXIT push notification (latest bar only, M15/H1)
