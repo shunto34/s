@@ -261,9 +261,6 @@ int g_hADX;
 bool g_showMSS   = true;
 bool g_showTrend  = true;
 
-//--- 認証連携: 一度認証成功後はTF切替時も描画継続
-bool g_AuthOnceSucceeded = false;
-
 //+------------------------------------------------------------------+
 int OnInit()
 {
@@ -281,7 +278,11 @@ int OnInit()
   EventSetTimer(5);
 // GogoJungle OnInit ////////////////////////////////////////////////|
 
-   if(AuthResult) g_AuthOnceSucceeded = true;
+   //--- 認証キャッシュ: 再初期化時にGrabWeb()失敗してもAuthResultを復元
+   if(!AuthResult && GlobalVariableCheck("FAPX_AuthOK"))
+      AuthResult = true;
+   if(AuthResult)
+      GlobalVariableSet("FAPX_AuthOK", 1.0);
 
    g_prefix = "FAPX_";
 
@@ -397,6 +398,9 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
+   if(reason == REASON_REMOVE)
+      GlobalVariableDel("FAPX_AuthOK");
+
    ObjectsDeleteAll(0, g_prefix);
    for(int i = 0; i < 8; i++)
       if(g_hEMA[i] != INVALID_HANDLE)
@@ -1556,8 +1560,7 @@ int OnCalculate(const int rates_total,
                 const int &spread[])
 {
 // GogoJungle OnCalculate ///////////////////////////////////////////|
-  if(AuthResult) g_AuthOnceSucceeded = true;
-  if(AuthResult == false && g_AuthOnceSucceeded == false){return(prev_calculated);}
+  if(AuthResult == false){return(0);}
 // GogoJungle OnCalculate ///////////////////////////////////////////|
 
    if(rates_total < InpEMA8 + 10) return(0);
@@ -1572,14 +1575,14 @@ int OnCalculate(const int rates_total,
    ArraySetAsSeries(g_ed4, false); ArraySetAsSeries(g_ed5, false);
    ArraySetAsSeries(g_ed6, false); ArraySetAsSeries(g_ed7, false);
 
-   if(CopyBuffer(g_hEMA[0],0,0,rates_total,g_ed0)<rates_total) return(prev_calculated);
-   if(CopyBuffer(g_hEMA[1],0,0,rates_total,g_ed1)<rates_total) return(prev_calculated);
-   if(CopyBuffer(g_hEMA[2],0,0,rates_total,g_ed2)<rates_total) return(prev_calculated);
-   if(CopyBuffer(g_hEMA[3],0,0,rates_total,g_ed3)<rates_total) return(prev_calculated);
-   if(CopyBuffer(g_hEMA[4],0,0,rates_total,g_ed4)<rates_total) return(prev_calculated);
-   if(CopyBuffer(g_hEMA[5],0,0,rates_total,g_ed5)<rates_total) return(prev_calculated);
-   if(CopyBuffer(g_hEMA[6],0,0,rates_total,g_ed6)<rates_total) return(prev_calculated);
-   if(CopyBuffer(g_hEMA[7],0,0,rates_total,g_ed7)<rates_total) return(prev_calculated);
+   if(CopyBuffer(g_hEMA[0],0,0,rates_total,g_ed0)<rates_total) return(0);
+   if(CopyBuffer(g_hEMA[1],0,0,rates_total,g_ed1)<rates_total) return(0);
+   if(CopyBuffer(g_hEMA[2],0,0,rates_total,g_ed2)<rates_total) return(0);
+   if(CopyBuffer(g_hEMA[3],0,0,rates_total,g_ed3)<rates_total) return(0);
+   if(CopyBuffer(g_hEMA[4],0,0,rates_total,g_ed4)<rates_total) return(0);
+   if(CopyBuffer(g_hEMA[5],0,0,rates_total,g_ed5)<rates_total) return(0);
+   if(CopyBuffer(g_hEMA[6],0,0,rates_total,g_ed6)<rates_total) return(0);
+   if(CopyBuffer(g_hEMA[7],0,0,rates_total,g_ed7)<rates_total) return(0);
 
    //=== Phase 1b: Fill ribbon + candle buffers ===
    for(int i = start; i < rates_total; i++)
@@ -1967,5 +1970,5 @@ void OnTimer()
   }
 // GogoJungle OnTimer ///////////////////////////////////////////////|
 
-   if(AuthResult) g_AuthOnceSucceeded = true;
+   if(AuthResult) GlobalVariableSet("FAPX_AuthOK", 1.0);
 }
