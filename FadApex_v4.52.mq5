@@ -281,6 +281,8 @@ int OnInit()
   EventSetTimer(5);
 // GogoJungle OnInit ////////////////////////////////////////////////|
 
+   if(AuthResult) g_AuthOnceSucceeded = true;
+
    g_prefix = "FAPX_";
 
    for(int i = 0; i < 8; i++) g_hEMA[i] = INVALID_HANDLE;
@@ -1555,7 +1557,7 @@ int OnCalculate(const int rates_total,
 {
 // GogoJungle OnCalculate ///////////////////////////////////////////|
   if(AuthResult) g_AuthOnceSucceeded = true;
-  if(AuthResult == false && g_AuthOnceSucceeded == false){return(0);}
+  if(AuthResult == false && g_AuthOnceSucceeded == false){return(prev_calculated);}
 // GogoJungle OnCalculate ///////////////////////////////////////////|
 
    if(rates_total < InpEMA8 + 10) return(0);
@@ -1570,14 +1572,14 @@ int OnCalculate(const int rates_total,
    ArraySetAsSeries(g_ed4, false); ArraySetAsSeries(g_ed5, false);
    ArraySetAsSeries(g_ed6, false); ArraySetAsSeries(g_ed7, false);
 
-   if(CopyBuffer(g_hEMA[0],0,0,rates_total,g_ed0)<rates_total) return(0);
-   if(CopyBuffer(g_hEMA[1],0,0,rates_total,g_ed1)<rates_total) return(0);
-   if(CopyBuffer(g_hEMA[2],0,0,rates_total,g_ed2)<rates_total) return(0);
-   if(CopyBuffer(g_hEMA[3],0,0,rates_total,g_ed3)<rates_total) return(0);
-   if(CopyBuffer(g_hEMA[4],0,0,rates_total,g_ed4)<rates_total) return(0);
-   if(CopyBuffer(g_hEMA[5],0,0,rates_total,g_ed5)<rates_total) return(0);
-   if(CopyBuffer(g_hEMA[6],0,0,rates_total,g_ed6)<rates_total) return(0);
-   if(CopyBuffer(g_hEMA[7],0,0,rates_total,g_ed7)<rates_total) return(0);
+   if(CopyBuffer(g_hEMA[0],0,0,rates_total,g_ed0)<rates_total) return(prev_calculated);
+   if(CopyBuffer(g_hEMA[1],0,0,rates_total,g_ed1)<rates_total) return(prev_calculated);
+   if(CopyBuffer(g_hEMA[2],0,0,rates_total,g_ed2)<rates_total) return(prev_calculated);
+   if(CopyBuffer(g_hEMA[3],0,0,rates_total,g_ed3)<rates_total) return(prev_calculated);
+   if(CopyBuffer(g_hEMA[4],0,0,rates_total,g_ed4)<rates_total) return(prev_calculated);
+   if(CopyBuffer(g_hEMA[5],0,0,rates_total,g_ed5)<rates_total) return(prev_calculated);
+   if(CopyBuffer(g_hEMA[6],0,0,rates_total,g_ed6)<rates_total) return(prev_calculated);
+   if(CopyBuffer(g_hEMA[7],0,0,rates_total,g_ed7)<rates_total) return(prev_calculated);
 
    //=== Phase 1b: Fill ribbon + candle buffers ===
    for(int i = start; i < rates_total; i++)
@@ -1964,4 +1966,6 @@ void OnTimer()
     if(!LastAuthResult && AuthResult) {ChartSetSymbolPeriod(0, _Symbol, _Period);}
   }
 // GogoJungle OnTimer ///////////////////////////////////////////////|
+
+   if(AuthResult) g_AuthOnceSucceeded = true;
 }
