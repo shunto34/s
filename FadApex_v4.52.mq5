@@ -177,6 +177,12 @@ input double InpRibbonATR    = 0.8;      // Ribbon width must be > ATR * this ra
 input int    InpCooldownBars = 8;        // Minimum bars between opposing signals
 input bool   InpShowExits    = true;     // Show EXIT take-profit signals
 input int    InpExitThreshold = 45;      // EXIT score threshold (0-100)
+input color  InpBullColorS   = C'0,255,140';   // BULL S rank color
+input color  InpBullColorA   = C'0,220,120';   // BULL A rank color
+input color  InpBullColorB   = C'0,180,100';   // BULL B rank color
+input color  InpBearColorS   = C'255,50,50';   // BEAR S rank color
+input color  InpBearColorA   = C'255,70,70';   // BEAR A rank color
+input color  InpBearColorB   = C'255,100,100'; // BEAR B rank color
 
 //--- Ribbon buffers (7 fills x 2 = 14)
 double g_ema1[];
@@ -1741,7 +1747,7 @@ int OnCalculate(const int rates_total,
             if(isBull)
             {
                g_bullSignal[i] = low[i];
-               color dotC = (score >= 3) ? C'0,255,140' : (score == 2) ? C'0,220,120' : C'0,180,100';
+               color dotC = (score >= 3) ? InpBullColorS : (score == 2) ? InpBullColorA : InpBullColorB;
                int dotSz = (score >= 3) ? 32 : (score == 2) ? 28 : 24;
                int txtSz = (score >= 3) ? 12 : (score == 2) ? 10 : 9;
                CreateSignalDot("DotBull" + IntegerToString(i),
@@ -1754,7 +1760,7 @@ int OnCalculate(const int rates_total,
             else
             {
                g_bearSignal[i] = high[i];
-               color dotC = (score >= 3) ? C'255,50,50' : (score == 2) ? C'255,70,70' : C'255,100,100';
+               color dotC = (score >= 3) ? InpBearColorS : (score == 2) ? InpBearColorA : InpBearColorB;
                int dotSz = (score >= 3) ? 32 : (score == 2) ? 28 : 24;
                int txtSz = (score >= 3) ? 12 : (score == 2) ? 10 : 9;
                CreateSignalDot("DotBear" + IntegerToString(i),
