@@ -65,6 +65,92 @@
 #property indicator_color10 C'50,205,130',C'230,85,85',C'110,110,125'
 #property indicator_style10 STYLE_SOLID
 #property indicator_width10 1
+// GogoJungle Top////////////////////////////////////////////////////|
+string pid = "78372";
+string AccountCert;
+#import "wininet.dll"
+#define INTERNET_OPEN_TYPE_DIRECT 0
+#define AGENT "MetaTrader 4 Terminal fx-on Auth 2018"
+#define READURL_BUFFER_SIZE 1000
+int InternetOpenW(string sAgent, int lAccessType, string sProxyName="", string sProxyBypass="", int lFlags=0);
+int InternetOpenUrlW(int hInternetSession, string sUrl, string sHeaders="", int lHeadersLength=0, int lFlags=0, int lContext=0);
+int InternetReadFile(int, uchar & arr[], int, int & arr2[]);
+int InternetCloseHandle(int hInet);
+#import
+int _prev_calculated;
+string GrabWeb(){
+  int ErrCd = 0;
+  string mes = "";
+
+  if(!TerminalInfoInteger(TERMINAL_DLLS_ALLOWED)) { ErrCd=1; mes="Authentication failure - Please allow use of DLL : by GogoJungle"; }
+  else if(StringFind(GetProgramName(), "_", 0)==-1){ ErrCd=11; mes="Invalid file name. Please download again from our site : by GogoJungle"; }
+  if(ErrCd>0) return(mes);
+
+  if(MQLInfoInteger(MQL_TESTER)) { mes="Authentication success - Testion mode : by GogoJungle"; return(mes); }
+
+  int lReturn[1];
+  uchar arrReceive[];
+  string sid = GetSid();
+  string fxOnURL = "https://auth.fx-on.com/indicator/index.php?pid=";
+  string strUrl = "";
+  StringConcatenate(strUrl, fxOnURL,pid, "&sid=",sid,"&ac=",AccountInfoString(ACCOUNT_COMPANY),"&an=",IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN)));
+  int hSession = InternetOpenW(AGENT, INTERNET_OPEN_TYPE_DIRECT, "0", "0", 0);
+  int hInternet = InternetOpenUrlW(hSession, strUrl, NULL, 0, 0, 0);
+  ArrayResize(arrReceive, READURL_BUFFER_SIZE + 1);
+  int success = InternetReadFile(hInternet, arrReceive, READURL_BUFFER_SIZE, lReturn);
+  string errmes = "Authentication failure - Error connecting to server : by GogoJungle";
+  if( success==0 ){
+    InternetCloseHandle(hSession);
+    return(errmes);
+  }
+  string strThisRead = CharArrayToString(arrReceive, 0, ArraySize(arrReceive), CP_UTF8);
+  InternetCloseHandle(hSession);
+  if(StringFind(strThisRead, "Authentication") == -1) return(errmes);
+  else return(strThisRead);
+}
+input bool Authentication_display = true;
+void Disp(string s){
+  Print(s);
+  Comment("");
+  if(Authentication_display || StringFind(s, "success") == -1) Comment(s);
+}
+string GetProgramName(){
+  string parts[];
+  StringSplit(MQLInfoString(MQL_PROGRAM_PATH), '\\', parts);
+  string name = parts[ArraySize(parts) - 1];
+  return(StringSubstr(name, 0, StringFind(name, ".")));
+}
+string GetSid(){
+  string filename=GetProgramName();
+  int strpos = 0;
+  int cutlen = 0;
+  for(int a=0; a<10 ; a++){     strpos = StringFind(filename, "_", 0)+1;
+    if(strpos<=0) break;
+    cutlen = StringLen(filename)-strpos;
+    filename = StringSubstr(filename, strpos, cutlen);
+  }
+  return(filename);
+}
+int IndicatorCountedFXON(){
+  if(AuthInitiarize == false){
+    AuthInitiarize = true;
+    return(0);
+  }
+  return IndicatorCountedMQL4();
+}
+
+
+int IndicatorCountedMQL4()
+{
+    if(_prev_calculated>0) return(_prev_calculated-1);
+    if(_prev_calculated==0) return(0);
+    return(0);
+}
+bool AuthInitiarize = false;
+bool AuthResult = false;
+bool AuthTry = false;
+// GogoJungle Top////////////////////////////////////////////////////|
+
 
 //--- Inputs
 input int    InpEMA1  = 5;
@@ -169,15 +255,26 @@ int g_hADX;
 bool g_showMSS   = true;
 bool g_showTrend  = true;
 
-//--- GogoJungle 認証連携
-//--- ※ GogoJungle認証コード挿入時、下記 AuthResult 行を削除してください
-//---   （GogoJungle側が bool AuthResult を宣言します）
-bool AuthResult          = true;   // Placeholder — 認証コード未挿入時はtrue固定
-bool g_AuthOnceSucceeded = false;  // 一度認証成功 → TF切替で描画をブロックしない
+//--- 認証連携: 一度認証成功後はTF切替時も描画継続
+bool g_AuthOnceSucceeded = false;
 
 //+------------------------------------------------------------------+
 int OnInit()
 {
+// GogoJungle OnInit ////////////////////////////////////////////////|
+  if(AccountInfoInteger(ACCOUNT_LOGIN) == 0){
+    AuthResult = false;
+    AuthTry = true;
+  }
+  else{
+    AccountCert = GrabWeb();
+    if(StringFind(AccountCert, "success") != -1) {AccountCert = StringSubstr(AccountCert, 0, StringFind(AccountCert, "success") + 23);}
+    Disp(AccountCert);
+    if(StringFind(AccountCert, "success") == -1) {AuthResult = false;}
+    else{AuthResult = true;} }
+  EventSetTimer(5);
+// GogoJungle OnInit ////////////////////////////////////////////////|
+
    g_prefix = "FAPX_";
 
    for(int i = 0; i < 8; i++) g_hEMA[i] = INVALID_HANDLE;
@@ -1450,13 +1547,12 @@ int OnCalculate(const int rates_total,
                 const long &volume[],
                 const int &spread[])
 {
-   if(rates_total < InpEMA8 + 10) return(0);
+// GogoJungle OnCalculate ///////////////////////////////////////////|
+  if(AuthResult) g_AuthOnceSucceeded = true;
+  if(AuthResult == false && g_AuthOnceSucceeded == false){return(0);}
+// GogoJungle OnCalculate ///////////////////////////////////////////|
 
-   // GogoJungle認証ガード: 認証成功を記録し、TF切替時の一時的な認証切れでも描画継続
-   if(AuthResult)
-      g_AuthOnceSucceeded = true;
-   if(!AuthResult && !g_AuthOnceSucceeded)
-      return(0);
+   if(rates_total < InpEMA8 + 10) return(0);
 
    int start = (prev_calculated == 0) ? (InpEMA8 + 10) : prev_calculated - 1;
    bool fullRecalc = (prev_calculated == 0);
@@ -1849,3 +1945,17 @@ void OnChartEvent(const int id, const long &lparam,
    { ChartSetSymbolPeriod(0, _Symbol, PERIOD_D1);  ObjectSetInteger(0, sparam, OBJPROP_STATE, false); }
 }
 //+------------------------------------------------------------------+
+void OnTimer()
+{
+// GogoJungle OnTimer ///////////////////////////////////////////////|
+  if(AuthTry == true && AccountInfoInteger(ACCOUNT_LOGIN) > 0){
+    AccountCert = GrabWeb();
+    if(StringFind(AccountCert, "success") != -1) {AccountCert = StringSubstr(AccountCert, 0, StringFind(AccountCert, "success") + 23);}
+    Disp(AccountCert);
+    AuthTry = false;
+    bool LastAuthResult = AuthResult;
+    AuthResult = (StringFind(AccountCert, "success") != -1);
+    if(!LastAuthResult && AuthResult) {ChartSetSymbolPeriod(0, _Symbol, _Period);}
+  }
+// GogoJungle OnTimer ///////////////////////////////////////////////|
+}
