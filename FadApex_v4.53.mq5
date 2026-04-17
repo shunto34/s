@@ -93,6 +93,8 @@ input double InpRibbonATR    = 0.8;      // Ribbon width must be > ATR * this ra
 input int    InpCooldownBars = 8;        // Minimum bars between opposing signals
 input bool   InpShowExits    = true;     // Show EXIT take-profit signals
 input int    InpExitThreshold = 45;      // EXIT score threshold (0-100)
+input color  InpBullColor     = C'0,255,140';   // Bull signal color
+input color  InpBearColor     = C'255,50,50';    // Bear signal color
 
 //--- Ribbon buffers (7 fills x 2 = 14)
 double g_ema1[];
@@ -171,6 +173,18 @@ int g_hADX;
 bool g_showMSS    = true;
 bool g_showTrend  = true;
 bool g_showRibbon = true;
+
+//+------------------------------------------------------------------+
+color DeriveRankColor(color base, int score)
+{
+   if(score >= 3) return base;
+   double f = (score == 2) ? 0.85 : 0.70;
+   int r = (int)(((base)       & 0xFF) * f + 128 * (1.0 - f));
+   int g = (int)(((base >> 8)  & 0xFF) * f + 128 * (1.0 - f));
+   int b = (int)(((base >> 16) & 0xFF) * f + 128 * (1.0 - f));
+   if(r > 255) r = 255; if(g > 255) g = 255; if(b > 255) b = 255;
+   return (color)(r | (g << 8) | (b << 16));
+}
 
 //+------------------------------------------------------------------+
 int OnInit()
@@ -1700,7 +1714,7 @@ int OnCalculate(const int rates_total,
             if(isBull)
             {
                g_bullSignal[i] = low[i];
-               color dotC = (score >= 3) ? C'0,255,140' : (score == 2) ? C'0,220,120' : C'0,180,100';
+               color dotC = DeriveRankColor(InpBullColor, score);
                int dotSz = (score >= 3) ? 32 : (score == 2) ? 28 : 24;
                int txtSz = (score >= 3) ? 12 : (score == 2) ? 10 : 9;
                CreateSignalDot("DotBull" + IntegerToString(i),
@@ -1713,7 +1727,7 @@ int OnCalculate(const int rates_total,
             else
             {
                g_bearSignal[i] = high[i];
-               color dotC = (score >= 3) ? C'255,50,50' : (score == 2) ? C'255,70,70' : C'255,100,100';
+               color dotC = DeriveRankColor(InpBearColor, score);
                int dotSz = (score >= 3) ? 32 : (score == 2) ? 28 : 24;
                int txtSz = (score >= 3) ? 12 : (score == 2) ? 10 : 9;
                CreateSignalDot("DotBear" + IntegerToString(i),
