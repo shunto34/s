@@ -612,16 +612,16 @@ string FmtPct(int wins, int losses)
 void UpdateAIPanel()
 {
    if(!g_showAI || !InpShowAIPanel) return;
-   ObjectSetString(0, g_prefix + "AITotal",
+   ObjectSetString(0, g_prefix + "AITotal", OBJPROP_TEXT,
       StringFormat("Signals: %d  (eval: %d)", g_signalLogSize, g_statTotalEval));
 
-   ObjectSetString(0, g_prefix + "AIRankS",
+   ObjectSetString(0, g_prefix + "AIRankS", OBJPROP_TEXT,
       StringFormat("S=%s  A=%s  B=%s",
          FmtPct(g_statWinS, g_statLossS),
          FmtPct(g_statWinA, g_statLossA),
          FmtPct(g_statWinB, g_statLossB)));
 
-   ObjectSetString(0, g_prefix + "AIRgTrend",
+   ObjectSetString(0, g_prefix + "AIRgTrend", OBJPROP_TEXT,
       StringFormat("Trend=%s Range=%s Brk=%s",
          FmtPct(g_statWinTrend, g_statLossTrend),
          FmtPct(g_statWinRange, g_statLossRange),
@@ -631,13 +631,13 @@ void UpdateAIPanel()
    if(g_effAdxThreshold == InpADXThreshold)
       adxTxt = StringFormat("ADX:  %d", g_effAdxThreshold);
    else
-      adxTxt = StringFormat("ADX:  %d → %d", InpADXThreshold, g_effAdxThreshold);
+      adxTxt = StringFormat("ADX:  %d -> %d", InpADXThreshold, g_effAdxThreshold);
    if(g_effExitThreshold == InpExitThreshold)
       exitTxt = StringFormat("EXIT: %d", g_effExitThreshold);
    else
-      exitTxt = StringFormat("EXIT: %d → %d", InpExitThreshold, g_effExitThreshold);
-   ObjectSetString(0, g_prefix + "AIThrAdx",  adxTxt);
-   ObjectSetString(0, g_prefix + "AIThrExit", exitTxt);
+      exitTxt = StringFormat("EXIT: %d -> %d", InpExitThreshold, g_effExitThreshold);
+   ObjectSetString(0, g_prefix + "AIThrAdx",  OBJPROP_TEXT, adxTxt);
+   ObjectSetString(0, g_prefix + "AIThrExit", OBJPROP_TEXT, exitTxt);
 }
 
 //--- Reset all learning data
