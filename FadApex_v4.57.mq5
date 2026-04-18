@@ -65,9 +65,6 @@
 #property indicator_color10 C'50,205,130',C'230,85,85',C'110,110,125'
 #property indicator_style10 STYLE_SOLID
 #property indicator_width10 1
-// GogoJungle Top////////////////////////////////////////////////////|
-// GogoJungle Top////////////////////////////////////////////////////|
-
 //--- Inputs
 input int    InpEMA1  = 5;
 input int    InpEMA2  = 8;
@@ -189,15 +186,6 @@ color DeriveRankColor(color base, int score)
 //+------------------------------------------------------------------+
 int OnInit()
 {
-// GogoJungle OnInit ////////////////////////////////////////////////|
-// GogoJungle OnInit ////////////////////////////////////////////////|
-
-   //--- 認証キャッシュ: 再初期化時にGrabWeb()が失敗してもAuthResultを復元
-   if(!AuthResult && GlobalVariableCheck("FAPX_AuthOK"))
-      AuthResult = true;
-   if(AuthResult)
-      GlobalVariableSet("FAPX_AuthOK", 1.0);
-
    g_prefix = "FAPX_";
 
    for(int i = 0; i < 8; i++) g_hEMA[i] = INVALID_HANDLE;
@@ -288,9 +276,6 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
-   if(reason == REASON_REMOVE)
-      GlobalVariableDel("FAPX_AuthOK");
-
    ObjectsDeleteAll(0, g_prefix);
    for(int i = 0; i < 8; i++)
       if(g_hEMA[i] != INVALID_HANDLE)
@@ -1509,9 +1494,6 @@ int OnCalculate(const int rates_total,
                 const long &volume[],
                 const int &spread[])
 {
-// GogoJungle OnCalculate ///////////////////////////////////////////|
-// GogoJungle OnCalculate ///////////////////////////////////////////|
-
    if(rates_total < InpEMA8 + 10) return(0);
 
    int start = (prev_calculated == 0) ? 0 : prev_calculated - 1;
@@ -1926,13 +1908,5 @@ void OnChartEvent(const int id, const long &lparam,
    { ChartSetSymbolPeriod(0, _Symbol, PERIOD_H4);  ObjectSetInteger(0, sparam, OBJPROP_STATE, false); }
    else if(sparam == g_prefix+"BtnD1")
    { ChartSetSymbolPeriod(0, _Symbol, PERIOD_D1);  ObjectSetInteger(0, sparam, OBJPROP_STATE, false); }
-}
-//+------------------------------------------------------------------+
-void OnTimer()
-{
-// GogoJungle OnTimer ///////////////////////////////////////////////|
-// GogoJungle OnTimer ///////////////////////////////////////////////|
-
-   if(AuthResult) GlobalVariableSet("FAPX_AuthOK", 1.0);
 }
 //+------------------------------------------------------------------+
