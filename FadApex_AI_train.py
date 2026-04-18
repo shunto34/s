@@ -29,17 +29,13 @@ try:
     import lightgbm as lgb
     from sklearn.model_selection import train_test_split
     from sklearn.metrics import roc_auc_score, mean_squared_error
-    from skl2onnx import convert_sklearn, update_registered_converter
-    from skl2onnx.common.data_types import FloatTensorType
-    from skl2onnx.common.shape_calculator import calculate_linear_regressor_output_shapes
-    from onnxmltools.convert.lightgbm.operator_converters.LightGbm import (
-        convert_lightgbm,
-    )
+    from onnxmltools import convert_lightgbm
+    from onnxmltools.convert.common.data_types import FloatTensorType
 except ImportError as e:
     raise SystemExit(
         f"Missing dependencies: {e}\n"
         "Install with:\n"
-        "  pip install lightgbm scikit-learn skl2onnx onnxmltools onnxruntime pandas numpy"
+        "  pip install lightgbm scikit-learn onnxmltools onnxruntime pandas numpy"
     )
 
 
@@ -332,17 +328,12 @@ def build_dataset(df: pd.DataFrame, pip: float) -> tuple[np.ndarray, np.ndarray]
 
 
 # --------------------------------------------------------------------------- #
-# ONNX export — LGBMRegressor produces single [batch, 1] output simplifying MQL5
+# ONNX export — use onnxmltools directly (cleaner path for LightGBM)
+# Output shape: [batch, 1] (LGBMRegressor single-output)
 # --------------------------------------------------------------------------- #
 def export_onnx(model: lgb.LGBMRegressor, out_path: str) -> None:
-    update_registered_converter(
-        lgb.LGBMRegressor,
-        "LightGbmLGBMRegressor",
-        calculate_linear_regressor_output_shapes,
-        convert_lightgbm,
-    )
     initial = [("features", FloatTensorType([None, FEATURE_DIM]))]
-    onx = convert_sklearn(
+    onx = convert_lightgbm(
         model,
         initial_types=initial,
         target_opset=15,
@@ -399,8 +390,15 @@ def main():
     print(f"[build] {len(X)} samples; win-rate in data = {y.mean():.3f}")
 
     print("[split] train/test split 80/20")
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2,
-                                                         random_state=42, stratify=y)
+    try:
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=42, stratify=y,
+        )
+    except ValueError:
+        # Too few samples in some class — fall back to non-stratified
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=42,
+        )
 
     print("[train] LightGBM regressor (target: WIN prob 0..1)...")
     model = lgb.LGBMRegressor(
@@ -417,8 +415,9 @@ def main():
     model.fit(X_train, y_train.astype(np.float32))
 
     p_test = np.clip(model.predict(X_test), 0.0, 1.0)
+    rmse = float(np.sqrt(mean_squared_error(y_test, p_test)))
     print(f"[eval] test AUC     = {roc_auc_score(y_test, p_test):.4f}")
-    print(f"[eval] test RMSE    = {mean_squared_error(y_test, p_test, squared=False):.4f}")
+    print(f"[eval] test RMSE    = {rmse:.4f}")
 
     print(f"[export] writing {args.out}")
     export_onnx(model, args.out)

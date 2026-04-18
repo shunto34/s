@@ -826,7 +826,7 @@ double PredictWinRate(const float &feat[])
 
    matrixf output_mf(1, 1);
 
-   if(!OnnxRun(g_aiHandle, ONNX_NO_CONVERSION, input_mf, output_mf))
+   if(!OnnxRun(g_aiHandle, ONNX_DEFAULT, input_mf, output_mf))
    {
       PrintFormat("FAPX AI: OnnxRun failed (err=%d).", GetLastError());
       return -1.0;
@@ -855,8 +855,8 @@ bool InitONNX()
                   InpAIModelFile, GetLastError());
       return false;
    }
-   const ulong inShape[]  = {1, (ulong)g_aiInputDim};
-   const ulong outShape[] = {1, 1};
+   ulong inShape[]  = {1, 18};  // must match g_aiInputDim (FEATURE_DIM in Python)
+   ulong outShape[] = {1, 1};
    if(!OnnxSetInputShape(g_aiHandle, 0, inShape))
    {
       PrintFormat("FAPX AI: OnnxSetInputShape failed (err=%d).", GetLastError());
@@ -2428,9 +2428,7 @@ int OnCalculate(const int rates_total,
                minW = MathMin(minW, MathAbs(g_ed0[j] - g_ed7[j]));
             if(curWidth > 0 && minW < curWidth * 0.5) score++;
 
-            // Rank: S(3-4), A(2), B(0-1)
             // Rank: S(3-4), A(2), B(0-1) — all ranks show dot + text
-            string rank = (score >= 3) ? "S" : (score == 2) ? "A" : "B";
 
             // --- ONNX AI win-rate prediction (Layer 1) ---
             int rg = DetectRegime((atrCopied > i) ? atrBuf[i] : 0, atrBuf, atrCopied, i);
