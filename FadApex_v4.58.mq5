@@ -578,7 +578,7 @@ void MakeAIBg()
    ObjectSetInteger(0, n, OBJPROP_ANCHOR,    ANCHOR_RIGHT_UPPER);
    ObjectSetInteger(0, n, OBJPROP_XDISTANCE, 8);
    ObjectSetInteger(0, n, OBJPROP_YDISTANCE, 260);
-   ObjectSetInteger(0, n, OBJPROP_XSIZE,     210);
+   ObjectSetInteger(0, n, OBJPROP_XSIZE,     250);
    ObjectSetInteger(0, n, OBJPROP_YSIZE,     190);
    ObjectSetInteger(0, n, OBJPROP_BGCOLOR,   C'18,22,34');
    ObjectSetInteger(0, n, OBJPROP_BORDER_TYPE,BORDER_FLAT);
@@ -591,13 +591,13 @@ void CreateAIPanel()
 {
    if(!g_showAI || !InpShowAIPanel) { DeleteAIPanelObjects(); return; }
    MakeAIBg();
-   MakeAILabel("AITitle",    15, 268, "── AI Stats ──────────", C'140,200,255', 9);
-   MakeAILabel("AITotal",    15, 286, "Signals: 0",             C'200,210,225', 9);
-   MakeAILabel("AIRankHdr",  15, 304, "WinRate (last 100):",    C'150,160,180', 8);
+   MakeAILabel("AITitle",    15, 268, "── AI 学習 ───────────", C'140,200,255', 9);
+   MakeAILabel("AITotal",    15, 286, "シグナル: 0",             C'200,210,225', 9);
+   MakeAILabel("AIRankHdr",  15, 304, "勝率 (直近100件):",       C'150,160,180', 8);
    MakeAILabel("AIRankS",    15, 320, "S=--  A=--  B=--",       C'200,210,225', 9);
-   MakeAILabel("AIRgHdr",    15, 340, "By Regime:",             C'150,160,180', 8);
-   MakeAILabel("AIRgTrend",  15, 356, "Trend=-- Range=-- Brk=--",C'200,210,225', 9);
-   MakeAILabel("AIThreshHdr",15, 378, "Effective Thresh:",      C'150,160,180', 8);
+   MakeAILabel("AIRgHdr",    15, 340, "相場環境別:",             C'150,160,180', 8);
+   MakeAILabel("AIRgTrend",  15, 356, "トレンド=-- レンジ=-- ブレイク=--",C'200,210,225', 9);
+   MakeAILabel("AIThreshHdr",15, 378, "自動調整:",              C'150,160,180', 8);
    MakeAILabel("AIThrAdx",   15, 394, "ADX:  --",               C'200,210,225', 9);
    MakeAILabel("AIThrExit",  15, 410, "EXIT: --",               C'200,210,225', 9);
 }
@@ -613,7 +613,7 @@ void UpdateAIPanel()
 {
    if(!g_showAI || !InpShowAIPanel) return;
    ObjectSetString(0, g_prefix + "AITotal", OBJPROP_TEXT,
-      StringFormat("Signals: %d  (eval: %d)", g_signalLogSize, g_statTotalEval));
+      StringFormat("シグナル: %d (評価済: %d)", g_signalLogSize, g_statTotalEval));
 
    ObjectSetString(0, g_prefix + "AIRankS", OBJPROP_TEXT,
       StringFormat("S=%s  A=%s  B=%s",
@@ -622,7 +622,7 @@ void UpdateAIPanel()
          FmtPct(g_statWinB, g_statLossB)));
 
    ObjectSetString(0, g_prefix + "AIRgTrend", OBJPROP_TEXT,
-      StringFormat("Trend=%s Range=%s Brk=%s",
+      StringFormat("トレンド=%s レンジ=%s ブレイク=%s",
          FmtPct(g_statWinTrend, g_statLossTrend),
          FmtPct(g_statWinRange, g_statLossRange),
          FmtPct(g_statWinBrk,   g_statLossBrk)));
