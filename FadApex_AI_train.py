@@ -1,16 +1,17 @@
 """
-FAD APEX AI Model Trainer
-=========================
-Builds a sigmoid classifier that predicts win-rate (0..1) for BULL/BEAR
-signals produced by FadApex_v4.59.mq5 (Phase B / Layer 1).
+FAD APEX AI Model Trainer (v4.60 ULTIMATE)
+==========================================
+Builds a regressor that predicts win-rate (0..1) for BULL/BEAR signals
+produced by FadApex_v4.60.mq5 (Phase B / Layer 1 + SMC features).
 
 Pipeline:
   1. Load MT5 historical OHLC CSV (exported from History Center or mt5 Python API)
-  2. Re-simulate v4.59 signal logic offline in Python
-  3. Label each signal with WIN (1) / LOSS (0) using +InpLearnWinPips / -InpLearnLossPips
-     within the next InpLearnLookback bars
-  4. Train LightGBM classifier on the 18-dim feature vector
-  5. Export to ONNX (FadApex_AI.onnx) — drop into MQL5/Files/
+  2. Re-simulate v4.60 signal logic offline in Python (base 18 features)
+  3. Extract 5 SMC features (sweep/OB/FVG/ChoCh/confluence) via simplified proxies
+  4. Label each signal with WIN (1) / LOSS (0) using +LEARN_WIN_PIPS / -LEARN_LOSS_PIPS
+     within the next LEARN_LOOKBACK bars
+  5. Train LightGBM regressor on the 23-dim feature vector
+  6. Export to ONNX (FadApex_AI.onnx) — drop into MQL5/Files/
 
 Usage:
     python FadApex_AI_train.py --csv USDJPY_M15.csv --symbol USDJPY --pip 0.01
@@ -53,7 +54,8 @@ LEARN_LOOKBACK = 20
 LEARN_WIN_PIPS = 30
 LEARN_LOSS_PIPS = 20
 
-FEATURE_DIM = 18
+FEATURE_DIM = 23  # v4.60: 18 base + 5 SMC (sweep/OB/FVG/ChoCh/smc_score)
+SMC_SWING_LB = 10
 
 
 # --------------------------------------------------------------------------- #
@@ -131,7 +133,9 @@ def detect_session(ts: pd.Timestamp) -> int:
 
 def extract_features(ctx: BarContext, df: pd.DataFrame, emas: list[np.ndarray],
                      atr_arr: np.ndarray, adx_arr: np.ndarray,
-                     htf_align_count: int) -> np.ndarray:
+                     htf_align_count: int,
+                     smc_sweep: int = 0, smc_ob: int = 0, smc_fvg: int = 0,
+                     smc_choch: int = 0, smc_score: int = 0) -> np.ndarray:
     i = ctx.i
     row = df.iloc[i]
     prev = df.iloc[i - 1] if i > 0 else row
@@ -192,6 +196,12 @@ def extract_features(ctx: BarContext, df: pd.DataFrame, emas: list[np.ndarray],
     feat[15] = ema_compress
     feat[16] = htf_align_count / 3.0
     feat[17] = 1.0 if ctx.is_bull else -1.0
+    # [18-22] SMC features (v4.60)
+    feat[18] = 1.0 if smc_sweep else 0.0
+    feat[19] = 1.0 if smc_ob else 0.0
+    feat[20] = 1.0 if smc_fvg else 0.0
+    feat[21] = 1.0 if smc_choch else 0.0
+    feat[22] = float(smc_score) / 7.0
     return feat
 
 
@@ -286,11 +296,54 @@ def build_dataset(df: pd.DataFrame, pip: float) -> tuple[np.ndarray, np.ndarray]
             if emas[3][i] < emas[6][i]: htf_align += 1
             if emas[4][i] < emas[7][i]: htf_align += 1
 
+        # --- v4.60 SMC proxy features (lightweight offline approximation) ---
+        # Sweep: current bar pierced recent N-bar swing in opposite direction
+        lbs = SMC_SWING_LB
+        sw_flag = 0
+        if i > lbs * 2:
+            if is_bull:
+                swing_low = float(np.min(low[i - 2 * lbs : i - lbs]))
+                if low[i - 1] < swing_low and close[i - 1] > swing_low:
+                    sw_flag = 1
+            else:
+                swing_hi = float(np.max(high[i - 2 * lbs : i - lbs]))
+                if high[i - 1] > swing_hi and close[i - 1] < swing_hi:
+                    sw_flag = 1
+        # OB proxy: last opposite candle before strong ATR move
+        ob_flag = 0
+        if i > 2 and atr_arr[i] > 0:
+            if is_bull:
+                move = close[i - 1] - close[i - 2]
+                if move >= 2.5 * atr_arr[i] and close[i - 2] < open_[i - 2]:
+                    ob_flag = 1
+            else:
+                move = close[i - 2] - close[i - 1]
+                if move >= 2.5 * atr_arr[i] and close[i - 2] > open_[i - 2]:
+                    ob_flag = 1
+        # FVG proxy: 3-candle imbalance on i-2,i-1,i
+        fvg_flag = 0
+        if i >= 2:
+            if is_bull and low[i] > high[i - 2]:
+                fvg_flag = 1
+            if not is_bull and high[i] < low[i - 2]:
+                fvg_flag = 1
+        # ChoCh proxy: close beyond last 5-bar opposite extreme
+        choch_flag = 0
+        if i > 5:
+            if is_bull and close[i] > float(np.max(high[i - 5 : i])):
+                choch_flag = 1
+            if not is_bull and close[i] < float(np.min(low[i - 5 : i])):
+                choch_flag = 1
+        smc_total = (2 * sw_flag) + (2 * ob_flag) + fvg_flag + (2 * choch_flag)
+
         ctx = BarContext(
             i=i, is_bull=is_bull, score=score, regime=regime,
             session=session, dow=dow, last_sig_bar=last_sig_bar,
         )
-        feat = extract_features(ctx, df, emas, atr_arr, adx_arr, htf_align)
+        feat = extract_features(ctx, df, emas, atr_arr, adx_arr, htf_align,
+                                smc_sweep=sw_flag, smc_ob=ob_flag,
+                                smc_fvg=fvg_flag, smc_choch=choch_flag,
+                                smc_score=smc_total)
 
         # --- Label: WIN=1, LOSS=0 (drop DRAW from training) ---
         win_delta = LEARN_WIN_PIPS * pip
