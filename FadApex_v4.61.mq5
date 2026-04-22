@@ -1621,6 +1621,15 @@ int OnCalculate(const int rates_total,
       int adxCopied = CopyBuffer(g_hADX, 0, 0, rates_total, adxBuf);
       int atrCopied = CopyBuffer(g_hChartATR, 0, 0, rates_total, atrBuf);
 
+      double pixToPrice = 0;
+      {
+         double pMax = ChartGetDouble(0, CHART_PRICE_MAX);
+         double pMin = ChartGetDouble(0, CHART_PRICE_MIN);
+         long   pxH  = ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
+         if(pMax > pMin && pxH > 0)
+            pixToPrice = (pMax - pMin) / (double)pxH;
+      }
+
       for(int i = startSig; i < rates_total; i++)
       {
          int buCnt = 0, beCnt = 0;
@@ -1714,7 +1723,8 @@ int OnCalculate(const int rates_total,
                CreateSignalDot("DotBull" + IntegerToString(i),
                   time[i], low[i], dotC, false, dotSz);
                string bTxt = (score >= 3) ? "BULL S \x2605" : (score == 2) ? "BULL A" : "BULL B";
-               double lblOfs = (atrCopied > i && atrBuf[i] > 0) ? atrBuf[i] * (dotSz * 0.025) : _Point * 15;
+               double lblOfs = (pixToPrice > 0) ? (dotSz + 5) * pixToPrice
+                             : ((atrCopied > i && atrBuf[i] > 0) ? atrBuf[i] * 0.7 : _Point * 15);
                CreateSignalLabel("SigBull" + IntegerToString(i),
                   time[i], low[i] - lblOfs, bTxt, dotC, false, txtSz);
             }
@@ -1727,7 +1737,8 @@ int OnCalculate(const int rates_total,
                CreateSignalDot("DotBear" + IntegerToString(i),
                   time[i], high[i], dotC, true, dotSz);
                string bTxt = (score >= 3) ? "BEAR S \x2605" : (score == 2) ? "BEAR A" : "BEAR B";
-               double lblOfs = (atrCopied > i && atrBuf[i] > 0) ? atrBuf[i] * (dotSz * 0.025) : _Point * 15;
+               double lblOfs = (pixToPrice > 0) ? (dotSz + 5) * pixToPrice
+                             : ((atrCopied > i && atrBuf[i] > 0) ? atrBuf[i] * 0.7 : _Point * 15);
                CreateSignalLabel("SigBear" + IntegerToString(i),
                   time[i], high[i] + lblOfs, bTxt, dotC, true, txtSz);
             }
@@ -1767,7 +1778,8 @@ int OnCalculate(const int rates_total,
                int eTxtSz = isStrong ? 12 : 10;
                string eTxt = isStrong ? "EXIT \x2605" : "EXIT";
 
-               double lblOfs = (atrCopied > i && atrBuf[i] > 0) ? atrBuf[i] * (eSz * 0.025) : _Point * 15;
+               double lblOfs = (pixToPrice > 0) ? (eSz + 5) * pixToPrice
+                             : ((atrCopied > i && atrBuf[i] > 0) ? atrBuf[i] * 0.7 : _Point * 15);
                if(isBullPos)
                {
                   // Exit long: marker above price
