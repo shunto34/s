@@ -84,6 +84,11 @@ input int    InpMaxLevels    = 3;
 input int    InpLevelExtend  = 50;
 input bool   InpPushNotify   = true;
 input bool   InpAlertSound   = true;
+input bool   InpNotifyBull   = true;     // Push notify on BULL signals
+input bool   InpNotifyBear   = true;     // Push notify on BEAR signals
+input bool   InpNotifyBOS    = true;     // Push notify on BOS (Break of Structure)
+input bool   InpNotifyMSS    = true;     // Push notify on MSS (Market Structure Shift)
+input bool   InpNotifyExit   = true;     // Push notify on EXIT signals
 input int    InpADXPeriod    = 14;       // ADX period for range filter
 input int    InpADXThreshold = 18;       // ADX below this = range (suppress signal)
 input double InpRibbonATR    = 0.8;      // Ribbon width must be > ATR * this ratio
@@ -1133,18 +1138,24 @@ void UpdateTrendPanel()
 }
 
 //+------------------------------------------------------------------+
-void SendSignalAlert(string direction, double price)
+void SendSignalAlert(string direction, double price,
+                     bool pushOverride = true, int confidence = -1)
 {
    string tf = EnumToString(Period());
    StringReplace(tf, "PERIOD_", "");
-   string msg = StringFormat("[%s] %s @ %s | %s | %s",
-                _Symbol, direction,
+   string arrow = "";
+   if(StringFind(direction, "BULL") >= 0) arrow = "\x25B2 ";
+   else if(StringFind(direction, "BEAR") >= 0) arrow = "\x25BC ";
+   string confStr = (confidence >= 0) ? StringFormat(" [%d%%]", confidence) : "";
+   string msg = StringFormat("[%s] %s%s @ %s%s | %s | %s",
+                _Symbol, arrow, direction,
                 DoubleToString(price, _Digits),
-                tf, TimeToString(TimeCurrent(), TIME_DATE|TIME_MINUTES));
+                confStr, tf,
+                TimeToString(TimeCurrent(), TIME_DATE|TIME_MINUTES));
    if(InpAlertSound)
       PlaySound("alert.wav");
    Alert(msg);
-   if(InpPushNotify)
+   if(InpPushNotify && pushOverride)
       SendNotification(msg);
    Print("FAD APEX: ", msg);
 }
@@ -1421,7 +1432,7 @@ void ProcessHTF(int tfIdx, int lb,
       if(bBu || bBe || mBu || mBe)
       {
          bool isRecent = (fullRecalc && i > chartTotal - 500) ||
-                         (!fullRecalc && i >= chartTotal - 3);
+                         (!fullRecalc && i >= chartTotal - 5);
          if(isRecent)
          {
             string timeSuffix = IntegerToString((long)chartTime[i]);
@@ -1444,22 +1455,19 @@ void ProcessHTF(int tfIdx, int lb,
                   "M", C'255,80,150', true);
 
             // MSS/BOS push notification (latest bars only, per-TF duplicate prevention)
-            // Get per-TF last notify time
             datetime lastMSS = (tfIdx == 0) ? g_lastMSSNotify0 : (tfIdx == 1) ? g_lastMSSNotify1 : g_lastMSSNotify2;
-            if(!fullRecalc && i >= chartTotal - 3 && chartTime[i] > lastMSS)
+            if(!fullRecalc && i >= chartTotal - 5 && chartTime[i] > lastMSS)
             {
-               // Notify ALL events on this bar (not just first one)
                string mssTypes[];
                int mssCount = 0;
                ArrayResize(mssTypes, 4);
-               if(mBu) { mssTypes[mssCount] = "MSS Bull"; mssCount++; }
-               if(mBe) { mssTypes[mssCount] = "MSS Bear"; mssCount++; }
-               if(bBu) { mssTypes[mssCount] = "BOS Bull"; mssCount++; }
-               if(bBe) { mssTypes[mssCount] = "BOS Bear"; mssCount++; }
+               if(mBu && InpNotifyMSS) { mssTypes[mssCount] = "MSS Bull"; mssCount++; }
+               if(mBe && InpNotifyMSS) { mssTypes[mssCount] = "MSS Bear"; mssCount++; }
+               if(bBu && InpNotifyBOS) { mssTypes[mssCount] = "BOS Bull"; mssCount++; }
+               if(bBe && InpNotifyBOS) { mssTypes[mssCount] = "BOS Bear"; mssCount++; }
 
                if(mssCount > 0)
                {
-                  // Update per-TF timestamp
                   if(tfIdx == 0) g_lastMSSNotify0 = chartTime[i];
                   else if(tfIdx == 1) g_lastMSSNotify1 = chartTime[i];
                   else g_lastMSSNotify2 = chartTime[i];
@@ -1468,8 +1476,12 @@ void ProcessHTF(int tfIdx, int lb,
                   StringReplace(tfStr2, "PERIOD_", "");
                   for(int m = 0; m < mssCount; m++)
                   {
-                     string mssMsg = StringFormat("[%s] %s %s | %s",
-                        _Symbol, mssTypes[m], tfName, tfStr2);
+                     bool isMSStype = (StringFind(mssTypes[m], "MSS") >= 0);
+                     string structArrow = isMSStype ? "\x00BB " : "\x203A ";
+                     int structConf = isMSStype ? 85 : 65;
+                     string mssMsg = StringFormat("[%s] %s%s %s [%d%%] | %s | %s",
+                        _Symbol, structArrow, mssTypes[m], tfName, structConf, tfStr2,
+                        TimeToString(TimeCurrent(), TIME_DATE|TIME_MINUTES));
                      Alert(mssMsg);
                      if(InpPushNotify)
                         SendNotification(mssMsg);
@@ -1723,12 +1735,18 @@ int OnCalculate(const int rates_total,
             lastSignalBar = i;  // Update anti-whipsaw tracker
             lastExitBar = -9999;  // Reset exit tracker on new entry signal
 
-            // Alert on latest bar
-            if(i == rates_total - 1 && prev_calculated > 0 && time[i] > g_lastNotifyTime)
+            // Alert on latest bars (completed + forming)
+            if(i >= rates_total - 2 && prev_calculated > 0 && time[i] > g_lastNotifyTime)
             {
                g_lastNotifyTime = time[i];
-               string rank = (score >= 3) ? "S" : (score == 2) ? "A" : "B";
-               SendSignalAlert(isBull ? "BULL " + rank : "BEAR " + rank, close[i]);
+               string rank2 = (score >= 3) ? "S" : (score == 2) ? "A" : "B";
+               int conf = 20 + score * 18;
+               if(adxCopied > i && adxBuf[i] > 30) conf += 8;
+               if(adxCopied > i && adxBuf[i] > 40) conf += 4;
+               if(conf > 99) conf = 99;
+               bool notifyThis = isBull ? InpNotifyBull : InpNotifyBear;
+               SendSignalAlert(isBull ? "BULL " + rank2 : "BEAR " + rank2,
+                               close[i], notifyThis, conf);
             }
          }
 
@@ -1767,18 +1785,19 @@ int OnCalculate(const int rates_total,
                      time[i], low[i] - lblOfs, eTxt, exitC, false, eTxtSz);
                }
 
-               // EXIT push notification (latest bar only, M15/H1)
-               if(i == rates_total - 1 && prev_calculated > 0 && time[i] > g_lastExitNotify)
+               // EXIT push notification (latest bars, completed + forming)
+               if(i >= rates_total - 2 && prev_calculated > 0 && time[i] > g_lastExitNotify)
                {
                   g_lastExitNotify = time[i];
                   string tfStr = EnumToString(Period());
                   StringReplace(tfStr, "PERIOD_", "");
-                  string exitMsg = StringFormat("[%s] %s %s @ %s | %s",
+                  string exitMsg = StringFormat("[%s] \x25C6 %s %s @ %s [%d%%] | %s | %s",
                      _Symbol, eTxt, isBullPos ? "LONG TP" : "SHORT TP",
-                     DoubleToString(close[i], _Digits), tfStr);
+                     DoubleToString(close[i], _Digits), exitScore, tfStr,
+                     TimeToString(TimeCurrent(), TIME_DATE|TIME_MINUTES));
                   if(InpAlertSound) PlaySound("alert.wav");
                   Alert(exitMsg);
-                  if(InpPushNotify)
+                  if(InpPushNotify && InpNotifyExit)
                      SendNotification(exitMsg);
                   Print("FAD APEX EXIT: ", exitMsg);
                }
