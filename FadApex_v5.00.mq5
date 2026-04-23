@@ -1982,6 +1982,78 @@ int OnCalculate(const int rates_total,
             if(inBearEnv || inBullEnv)
             {
                double atrI = (atrCopied > i && atrBuf[i] > 0) ? atrBuf[i] : _Point * 100;
+
+               //==================================================
+               // HARD GATES — block premature reversal signals
+               //==================================================
+
+               // GATE 1: EMA ribbon not falling/rising too steeply
+               // Reasoning: fighting strong trends = ダマシ. Wait for slowdown.
+               double ribSlope = (i >= 5) ? (g_ed3[i] - g_ed3[i-5]) / 5.0 : 0.0;
+               double slopeThr = atrI * 0.18;
+               bool g1Bull = (ribSlope > -slopeThr);  // bear-ribbon not too steep DOWN
+               bool g1Bear = (ribSlope <  slopeThr);  // bull-ribbon not too steep UP
+
+               // GATE 2: Supertrend distance — price not too far from flip line
+               // If price is >2 ATR away from flip line, trend has too much momentum
+               bool g2Bull = true, g2Bear = true;
+               if(flipCopied > 0 && i < ArraySize(g_flipDir))
+               {
+                  if(g_flipDir[i] == -1 && (g_flipLine[i] - close[i]) > 2.0 * atrI)
+                     g2Bull = false;
+                  if(g_flipDir[i] == 1 && (close[i] - g_flipLine[i]) > 2.0 * atrI)
+                     g2Bear = false;
+               }
+
+               // GATE 3: Market structure — higher low (BULL) / lower high (BEAR)
+               // Recent 6 bars vs 7-15 bars ago must show structure shift
+               bool g3Bull = false, g3Bear = false;
+               if(i >= 15)
+               {
+                  double lowR = DBL_MAX, lowP = DBL_MAX;
+                  double hiR  = 0,       hiP  = 0;
+                  for(int k = i - 1; k >= i - 6; k--)
+                  {
+                     if(low[k]  < lowR) lowR = low[k];
+                     if(high[k] > hiR)  hiR  = high[k];
+                  }
+                  for(int k = i - 7; k >= i - 15; k--)
+                  {
+                     if(low[k]  < lowP) lowP = low[k];
+                     if(high[k] > hiP)  hiP  = high[k];
+                  }
+                  g3Bull = (lowR > lowP + 0.12 * atrI);  // higher low
+                  g3Bear = (hiR  < hiP  - 0.12 * atrI);  // lower high
+               }
+
+               // GATE 4: Price reversal confirmation — last bar confirms direction
+               bool g4Bull = false, g4Bear = false;
+               if(i >= 3)
+               {
+                  double avgLo3 = (low[i-1]  + low[i-2]  + low[i-3])  / 3.0;
+                  double avgHi3 = (high[i-1] + high[i-2] + high[i-3]) / 3.0;
+                  g4Bull = (close[i] > close[i-1])
+                        && (low[i] >= low[i-1] - 0.2 * atrI)
+                        && (close[i] > avgLo3 + 0.1 * atrI);
+                  g4Bear = (close[i] < close[i-1])
+                        && (high[i] <= high[i-1] + 0.2 * atrI)
+                        && (close[i] < avgHi3 - 0.1 * atrI);
+               }
+
+               // Aggressive sensitivity: G3 OR G4 is enough
+               // Balanced/Conservative: ALL four gates required
+               bool hardBull, hardBear;
+               if(InpSensitivity == SENS_AGGRESSIVE)
+               {
+                  hardBull = g1Bull && g2Bull && (g3Bull || g4Bull);
+                  hardBear = g1Bear && g2Bear && (g3Bear || g4Bear);
+               }
+               else
+               {
+                  hardBull = g1Bull && g2Bull && g3Bull && g4Bull;
+                  hardBear = g1Bear && g2Bear && g3Bear && g4Bear;
+               }
+
                int bullPts = 0, bearPts = 0;
                bool primaryBull = false, primaryBear = false;
 
@@ -2094,9 +2166,9 @@ int OnCalculate(const int rates_total,
                              : (InpSensitivity == SENS_BALANCED)     ? 3 : 2;
                bool needPrimary = (InpSensitivity != SENS_AGGRESSIVE);
 
-               bool eBull = inBearEnv && bullPts >= threshold
+               bool eBull = inBearEnv && hardBull && bullPts >= threshold
                          && (!needPrimary || primaryBull);
-               bool eBear = inBullEnv && bearPts >= threshold
+               bool eBear = inBullEnv && hardBear && bearPts >= threshold
                          && (!needPrimary || primaryBear);
 
                if(eBull || eBear)
@@ -2120,10 +2192,13 @@ int OnCalculate(const int rates_total,
                   if(i >= rates_total - 2 && prev_calculated > 0 && time[i] > g_lastNotifyTime)
                   {
                      g_lastNotifyTime = time[i];
-                     int eConf = 25 + eScore * 7;
+                     int eConf = 40 + eScore * 6;
                      if(hasFlip) eConf += 10;
                      if(primaryBull || primaryBear) eConf += 8;
                      if(adxCopied > i && adxBuf[i] > 25) eConf += 5;
+                     // Structure + price reversal both confirmed = high confidence
+                     bool allGates = eIsBull ? (g3Bull && g4Bull) : (g3Bear && g4Bear);
+                     if(allGates) eConf += 7;
                      if(eConf > 95) eConf = 95;
                      bool notifyE = eIsBull ? InpNotifyBull : InpNotifyBear;
                      SendSignalAlert(eIsBull ? "EARLY BULL" : "EARLY BEAR",
