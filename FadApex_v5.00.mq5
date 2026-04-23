@@ -1969,70 +1969,113 @@ int OnCalculate(const int rates_total,
 
          //=== EARLY ENTRY SIGNAL: Supertrend flip / fast EMA cross ===
          // Fires BEFORE full master trend transition for leading detection
-         if(InpEarlyEntry && i > startSig + 5
+         if(InpEarlyEntry && i > startSig + 10 && i >= 5
             && (i - g_lastEarlyBar) >= InpEarlyCooldown
             && (i - lastSignalBar) >= InpEarlyCooldown)
          {
+            // ==================== TRIGGER ====================
             bool stFlipBull = false, stFlipBear = false;
-            if(flipCopied > 0 && i < ArraySize(g_flipDir) && i > 0)
+            if(flipCopied > 0 && i < ArraySize(g_flipDir))
             {
                stFlipBull = (g_flipDir[i] == 1  && g_flipDir[i - 1] == -1);
                stFlipBear = (g_flipDir[i] == -1 && g_flipDir[i - 1] == 1);
             }
-            // Fast EMA cross (EMA5 through EMA21)
-            bool xemaBull = (i > 0 && g_ed0[i] > g_ed3[i] && g_ed0[i - 1] <= g_ed3[i - 1]);
-            bool xemaBear = (i > 0 && g_ed0[i] < g_ed3[i] && g_ed0[i - 1] >= g_ed3[i - 1]);
+            bool xemaBull = (g_ed0[i] > g_ed3[i] && g_ed0[i - 1] <= g_ed3[i - 1]);
+            bool xemaBear = (g_ed0[i] < g_ed3[i] && g_ed0[i - 1] >= g_ed3[i - 1]);
+            bool trigBull = stFlipBull || xemaBull;
+            bool trigBear = stFlipBear || xemaBear;
 
-            bool eBullRaw = (stFlipBull || xemaBull)
-                            && close[i] > open[i]
-                            && close[i] > g_ed0[i];
-            bool eBearRaw = (stFlipBear || xemaBear)
-                            && close[i] < open[i]
-                            && close[i] < g_ed0[i];
-
-            // Momentum confirmation (soft gate — not hard blocking)
-            bool eMomOKBull = true, eMomOKBear = true;
-            if(InpUseMomentum && rsiCopied > i)
+            if(trigBull || trigBear)
             {
-               eMomOKBull = (rsiBuf[i] > 45);
-               eMomOKBear = (rsiBuf[i] < 55);
-            }
+               double atrI = (atrCopied > i && atrBuf[i] > 0) ? atrBuf[i] : _Point * 100;
 
-            bool eBull = eBullRaw && eMomOKBull;
-            bool eBear = eBearRaw && eMomOKBear;
+               // 1. STRONG BAR: body > 0.5 ATR, close in leading 40% of range
+               double body = close[i] - open[i];
+               double rng  = high[i] - low[i];
+               bool f1Bull = (body > 0.4 * atrI) && rng > 0 && (close[i] - low[i]) > rng * 0.6;
+               bool f1Bear = (-body > 0.4 * atrI) && rng > 0 && (high[i] - close[i]) > rng * 0.6;
 
-            if(eBull || eBear)
-            {
-               g_lastEarlyBar = i;
-               bool eIsBull = eBull;
-               color eC   = eIsBull ? C'80,220,255' : C'255,170,80';
-               string eTxt = eIsBull ? "EARLY \x25B2" : "EARLY \x25BC";
-               double ePr = eIsBull ? low[i] : high[i];
-               int eDot = stFlipBull || stFlipBear ? 24 : 20;
-               CreateSignalDot("DotEarly" + IntegerToString(i),
-                  time[i], ePr, eC, !eIsBull, eDot);
-               double eOfs = (pixToPrice > 0) ? (eDot + 5) * pixToPrice
-                           : ((atrCopied > i && atrBuf[i] > 0) ? atrBuf[i] * 0.7 : _Point * 15);
-               double eLblPr = eIsBull ? (ePr - eOfs) : (ePr + eOfs);
-               CreateSignalLabel("SigEarly" + IntegerToString(i),
-                  time[i], eLblPr, eTxt, eC, !eIsBull, 9);
+               // 2. TREND STRUCTURE: fast EMAs aligned + rising/falling
+               bool f2Bull = (g_ed0[i] > g_ed2[i]) && (g_ed2[i] > g_ed4[i])
+                          && (g_ed0[i] > g_ed0[i - 1]) && (g_ed0[i - 1] >= g_ed0[i - 2]);
+               bool f2Bear = (g_ed0[i] < g_ed2[i]) && (g_ed2[i] < g_ed4[i])
+                          && (g_ed0[i] < g_ed0[i - 1]) && (g_ed0[i - 1] <= g_ed0[i - 2]);
 
-               if(i >= rates_total - 2 && prev_calculated > 0 && time[i] > g_lastNotifyTime)
+               // 3. RSI: > 52 rising / < 48 falling
+               bool f3Bull = false, f3Bear = false;
+               if(rsiCopied > i)
                {
-                  g_lastNotifyTime = time[i];
-                  int eConf = 40;
-                  if(stFlipBull || stFlipBear) eConf += 20;
-                  if(xemaBull || xemaBear)     eConf += 10;
-                  if(InpUseMomentum && rsiCopied > i)
+                  f3Bull = (rsiBuf[i] > 52) && (rsiBuf[i] > rsiBuf[i - 1]);
+                  f3Bear = (rsiBuf[i] < 48) && (rsiBuf[i] < rsiBuf[i - 1]);
+               }
+
+               // 4. STOCHASTIC: not overbought/oversold, K crossing D
+               bool f4Bull = false, f4Bear = false;
+               if(stochCopied > i)
+               {
+                  f4Bull = (stochKBuf[i] > stochDBuf[i]) && (stochKBuf[i] < 80) && (stochKBuf[i] > 35);
+                  f4Bear = (stochKBuf[i] < stochDBuf[i]) && (stochKBuf[i] > 20) && (stochKBuf[i] < 65);
+               }
+
+               // 5. ADX: trending market, not range
+               bool f5 = (adxCopied > i && adxBuf[i] > 22);
+
+               // 6. CLEAR BREAKOUT: close above/below EMA5 by 0.25 ATR
+               bool f6Bull = (close[i] > g_ed0[i] + 0.25 * atrI);
+               bool f6Bear = (close[i] < g_ed0[i] - 0.25 * atrI);
+
+               // 7. ROOM TO RUN: not at immediate resistance/support
+               double recentHi = high[i - 1], recentLo = low[i - 1];
+               for(int k = MathMax(0, i - 10); k < i; k++)
+               {
+                  if(high[k] > recentHi) recentHi = high[k];
+                  if(low[k]  < recentLo) recentLo = low[k];
+               }
+               bool f7Bull = (close[i] > recentHi + 0.1 * atrI)
+                          || (recentHi - close[i] > 0.5 * atrI);
+               bool f7Bear = (close[i] < recentLo - 0.1 * atrI)
+                          || (close[i] - recentLo > 0.5 * atrI);
+
+               // 8. PREVIOUS BAR NOT DEEP PULLBACK
+               bool f8Bull = (low[i - 1]  > g_ed4[i - 1] - 0.3 * atrI);
+               bool f8Bear = (high[i - 1] < g_ed4[i - 1] + 0.3 * atrI);
+
+               // ALL filters must pass
+               bool eBull = trigBull && f1Bull && f2Bull && f3Bull && f4Bull
+                         && f5 && f6Bull && f7Bull && f8Bull;
+               bool eBear = trigBear && f1Bear && f2Bear && f3Bear && f4Bear
+                         && f5 && f6Bear && f7Bear && f8Bear;
+
+               if(eBull || eBear)
+               {
+                  g_lastEarlyBar = i;
+                  bool eIsBull = eBull;
+                  color eC   = eIsBull ? C'80,220,255' : C'255,170,80';
+                  string eTxt = eIsBull ? "EARLY \x25B2" : "EARLY \x25BC";
+                  double ePr = eIsBull ? low[i] : high[i];
+                  int eDot = (stFlipBull || stFlipBear) ? 26 : 22;
+                  CreateSignalDot("DotEarly" + IntegerToString(i),
+                     time[i], ePr, eC, !eIsBull, eDot);
+                  double eOfs = (pixToPrice > 0) ? (eDot + 5) * pixToPrice
+                              : ((atrCopied > i && atrBuf[i] > 0) ? atrBuf[i] * 0.7 : _Point * 15);
+                  double eLblPr = eIsBull ? (ePr - eOfs) : (ePr + eOfs);
+                  CreateSignalLabel("SigEarly" + IntegerToString(i),
+                     time[i], eLblPr, eTxt, eC, !eIsBull, 9);
+
+                  if(i >= rates_total - 2 && prev_calculated > 0 && time[i] > g_lastNotifyTime)
                   {
-                     if(eIsBull && rsiBuf[i] > 55) eConf += 8;
-                     if(!eIsBull && rsiBuf[i] < 45) eConf += 8;
+                     g_lastNotifyTime = time[i];
+                     // All 8 filters passed, high confidence
+                     int eConf = 70;
+                     if(stFlipBull || stFlipBear) eConf += 12;
+                     if(xemaBull || xemaBear)     eConf += 6;
+                     if(adxCopied > i && adxBuf[i] > 30) eConf += 6;
+                     if(adxCopied > i && adxBuf[i] > 40) eConf += 4;
+                     if(eConf > 95) eConf = 95;
+                     bool notifyE = eIsBull ? InpNotifyBull : InpNotifyBear;
+                     SendSignalAlert(eIsBull ? "EARLY BULL" : "EARLY BEAR",
+                                     close[i], notifyE, eConf);
                   }
-                  if(adxCopied > i && adxBuf[i] > 25) eConf += 8;
-                  if(eConf > 85) eConf = 85;
-                  bool notifyE = eIsBull ? InpNotifyBull : InpNotifyBear;
-                  SendSignalAlert(eIsBull ? "EARLY BULL" : "EARLY BEAR",
-                                  close[i], notifyE, eConf);
                }
             }
          }
