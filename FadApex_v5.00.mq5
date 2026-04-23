@@ -101,7 +101,7 @@ input color  InpBearColor     = C'255,50,50';    // Bear signal color
 
 //--- PRECISION FILTERS (GEXR Fusion)
 enum ENUM_SENSITIVITY { SENS_CONSERVATIVE=0, SENS_BALANCED=1, SENS_AGGRESSIVE=2 };
-input string          _sep_fus        = "";            // ══════ PRECISION FILTERS ══════
+input string          _sep_fus        = "---";          // ===== PRECISION FILTERS =====
 input ENUM_SENSITIVITY InpSensitivity  = SENS_BALANCED; // Signal Sensitivity
 input bool   InpUseFlipFilter = true;     // ATR Supertrend Direction Filter
 input double InpFlipMult      = 2.0;      // Supertrend ATR Multiplier
@@ -249,21 +249,29 @@ void CalcSupertrend(int rates_total, const double &high[], const double &low[],
 void DrawSupertrendLine(int start, int end, const datetime &time[])
 {
    if(!InpShowFlipLine) return;
-   for(int i = MathMax(1, start); i < end; i++)
+   int drawStart = MathMax(MathMax(1, start), end - 500);
+   int flipSize  = ArraySize(g_flipDir);
+   for(int i = drawStart; i < end; i++)
    {
+      if(i >= flipSize || i - 1 < 0) continue;
       string nm = g_prefix + "ST" + IntegerToString(i);
       color  c  = (g_flipDir[i] == 1) ? C'0,200,120' : C'220,60,60';
       if(ObjectFind(0, nm) >= 0)
       {
          ObjectSetInteger(0, nm, OBJPROP_COLOR, c);
+         ObjectMove(0, nm, 0, time[i - 1], g_flipLine[i - 1]);
+         ObjectMove(0, nm, 1, time[i], g_flipLine[i]);
          continue;
       }
-      ObjectCreate(0, nm, OBJ_TREND, 0, time[i - 1], g_flipLine[i - 1], time[i], g_flipLine[i]);
+      if(!ObjectCreate(0, nm, OBJ_TREND, 0, time[i - 1], g_flipLine[i - 1], time[i], g_flipLine[i]))
+         continue;
       ObjectSetInteger(0, nm, OBJPROP_COLOR, c);
       ObjectSetInteger(0, nm, OBJPROP_WIDTH, 2);
       ObjectSetInteger(0, nm, OBJPROP_RAY_RIGHT, false);
       ObjectSetInteger(0, nm, OBJPROP_BACK, true);
       ObjectSetInteger(0, nm, OBJPROP_STYLE, STYLE_SOLID);
+      ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
    }
 }
 
@@ -1750,8 +1758,9 @@ int OnCalculate(const int rates_total,
          rsiCopied = CopyBuffer(g_hRSI, 0, 0, rates_total, rsiBuf);
       if(InpUseMomentum && g_hStoch != INVALID_HANDLE)
       {
-         stochCopied = CopyBuffer(g_hStoch, 0, 0, rates_total, stochKBuf);
-         CopyBuffer(g_hStoch, 1, 0, rates_total, stochDBuf);
+         int kCnt = CopyBuffer(g_hStoch, 0, 0, rates_total, stochKBuf);
+         int dCnt = CopyBuffer(g_hStoch, 1, 0, rates_total, stochDBuf);
+         stochCopied = (kCnt > 0 && dCnt > 0) ? MathMin(kCnt, dCnt) : 0;
       }
       if(g_hFlipATR != INVALID_HANDLE)
       {
@@ -1954,7 +1963,8 @@ int OnCalculate(const int rates_total,
          }
 
          //=== CONTINUATION SIGNAL: pullback to ribbon bounce ===
-         if(InpContSignals && prevMaster != 0 && (i - lastSignalBar) >= InpContCooldown
+         if(InpContSignals && prevMaster != 0 && lastSignalBar > 0
+            && (i - lastSignalBar) >= InpContCooldown
             && (i - g_lastContBar) >= InpCooldownBars && passRange)
          {
             bool cBull = (prevMaster == 1);
