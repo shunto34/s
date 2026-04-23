@@ -1967,93 +1967,148 @@ int OnCalculate(const int rates_total,
             } // passFilter
          }
 
-         //=== EARLY ENTRY SIGNAL: Supertrend flip / fast EMA cross ===
-         // Fires BEFORE full master trend transition for leading detection
-         if(InpEarlyEntry && i > startSig + 10 && i >= 5
+         //=== EARLY REVERSAL SIGNAL: trend exhaustion & reversal detection ===
+         // Detects reversal onset WITHIN the current trend (before trend change)
+         // Flow: downtrend → EARLY BULL fires → price reverses → BULL S/A/B confirms
+         if(InpEarlyEntry && i > startSig + 20 && i >= 10
             && (i - g_lastEarlyBar) >= InpEarlyCooldown
-            && (i - lastSignalBar) >= InpEarlyCooldown)
+            && (i - lastSignalBar) >= (InpEarlyCooldown / 2))
          {
-            // ==================== TRIGGER ====================
-            bool stFlipBull = false, stFlipBear = false;
-            if(flipCopied > 0 && i < ArraySize(g_flipDir))
-            {
-               stFlipBull = (g_flipDir[i] == 1  && g_flipDir[i - 1] == -1);
-               stFlipBear = (g_flipDir[i] == -1 && g_flipDir[i - 1] == 1);
-            }
-            bool xemaBull = (g_ed0[i] > g_ed3[i] && g_ed0[i - 1] <= g_ed3[i - 1]);
-            bool xemaBear = (g_ed0[i] < g_ed3[i] && g_ed0[i - 1] >= g_ed3[i - 1]);
-            bool trigBull = stFlipBull || xemaBull;
-            bool trigBear = stFlipBear || xemaBear;
+            bool inBearEnv = (prevMaster == -1)
+                          || (g_ed0[i] < g_ed7[i] && g_ed0[i-1] < g_ed7[i-1]);
+            bool inBullEnv = (prevMaster == 1)
+                          || (g_ed0[i] > g_ed7[i] && g_ed0[i-1] > g_ed7[i-1]);
 
-            if(trigBull || trigBear)
+            if(inBearEnv || inBullEnv)
             {
                double atrI = (atrCopied > i && atrBuf[i] > 0) ? atrBuf[i] : _Point * 100;
+               int bullPts = 0, bearPts = 0;
+               bool primaryBull = false, primaryBear = false;
 
-               // 1. STRONG BAR: body > 0.5 ATR, close in leading 40% of range
-               double body = close[i] - open[i];
-               double rng  = high[i] - low[i];
-               bool f1Bull = (body > 0.4 * atrI) && rng > 0 && (close[i] - low[i]) > rng * 0.6;
-               bool f1Bear = (-body > 0.4 * atrI) && rng > 0 && (high[i] - close[i]) > rng * 0.6;
-
-               // 2. TREND STRUCTURE: fast EMAs aligned + rising/falling
-               bool f2Bull = (g_ed0[i] > g_ed2[i]) && (g_ed2[i] > g_ed4[i])
-                          && (g_ed0[i] > g_ed0[i - 1]) && (g_ed0[i - 1] >= g_ed0[i - 2]);
-               bool f2Bear = (g_ed0[i] < g_ed2[i]) && (g_ed2[i] < g_ed4[i])
-                          && (g_ed0[i] < g_ed0[i - 1]) && (g_ed0[i - 1] <= g_ed0[i - 2]);
-
-               // 3. RSI: > 52 rising / < 48 falling
-               bool f3Bull = false, f3Bear = false;
-               if(rsiCopied > i)
+               // --- Signal 1: RSI DIVERGENCE (2 pts, primary) ---
+               if(rsiCopied > i && i >= 15)
                {
-                  f3Bull = (rsiBuf[i] > 52) && (rsiBuf[i] > rsiBuf[i - 1]);
-                  f3Bear = (rsiBuf[i] < 48) && (rsiBuf[i] < rsiBuf[i - 1]);
+                  int lb = MathMin(20, i - startSig);
+                  double pLow = DBL_MAX, rLow = 999;
+                  double pHi  = 0,       rHi  = -999;
+                  for(int k = i - 5; k >= MathMax(0, i - lb); k--)
+                  {
+                     if(low[k]  < pLow) { pLow = low[k];  rLow = rsiBuf[k]; }
+                     if(high[k] > pHi)  { pHi  = high[k]; rHi  = rsiBuf[k]; }
+                  }
+                  if(low[i] <= pLow + 0.15 * atrI && rsiBuf[i] > rLow + 3)
+                  { bullPts += 2; primaryBull = true; }
+                  if(rsiBuf[i] < 35 && rsiBuf[i] > rsiBuf[i-1]
+                     && rsiBuf[i-1] <= rsiBuf[i-2])
+                  { bullPts += 1; primaryBull = true; }
+                  if(high[i] >= pHi - 0.15 * atrI && rsiBuf[i] < rHi - 3)
+                  { bearPts += 2; primaryBear = true; }
+                  if(rsiBuf[i] > 65 && rsiBuf[i] < rsiBuf[i-1]
+                     && rsiBuf[i-1] >= rsiBuf[i-2])
+                  { bearPts += 1; primaryBear = true; }
                }
 
-               // 4. STOCHASTIC: not overbought/oversold, K crossing D
-               bool f4Bull = false, f4Bear = false;
-               if(stochCopied > i)
+               // --- Signal 2: STOCHASTIC REVERSAL FROM EXTREME (2 pts, primary) ---
+               if(stochCopied > i && i >= 2)
                {
-                  f4Bull = (stochKBuf[i] > stochDBuf[i]) && (stochKBuf[i] < 80) && (stochKBuf[i] > 35);
-                  f4Bear = (stochKBuf[i] < stochDBuf[i]) && (stochKBuf[i] > 20) && (stochKBuf[i] < 65);
+                  bool kxUpOS = (stochKBuf[i] > stochDBuf[i])
+                             && (stochKBuf[i-1] <= stochDBuf[i-1])
+                             && (stochKBuf[i] < 35 || stochKBuf[i-1] < 25);
+                  if(kxUpOS) { bullPts += 2; primaryBull = true; }
+                  bool kxDnOB = (stochKBuf[i] < stochDBuf[i])
+                             && (stochKBuf[i-1] >= stochDBuf[i-1])
+                             && (stochKBuf[i] > 65 || stochKBuf[i-1] > 75);
+                  if(kxDnOB) { bearPts += 2; primaryBear = true; }
                }
 
-               // 5. ADX: trending market, not range
-               bool f5 = (adxCopied > i && adxBuf[i] > 22);
-
-               // 6. CLEAR BREAKOUT: close above/below EMA5 by 0.25 ATR
-               bool f6Bull = (close[i] > g_ed0[i] + 0.25 * atrI);
-               bool f6Bear = (close[i] < g_ed0[i] - 0.25 * atrI);
-
-               // 7. ROOM TO RUN: not at immediate resistance/support
-               double recentHi = high[i - 1], recentLo = low[i - 1];
-               for(int k = MathMax(0, i - 10); k < i; k++)
+               // --- Signal 3: SUPERTREND FLIP (2 pts, primary) / PROXIMITY (1 pt) ---
+               bool stFlipBull = false, stFlipBear = false;
+               if(flipCopied > 0 && i < ArraySize(g_flipDir) && i >= 1)
                {
-                  if(high[k] > recentHi) recentHi = high[k];
-                  if(low[k]  < recentLo) recentLo = low[k];
+                  stFlipBull = (g_flipDir[i] == 1  && g_flipDir[i-1] == -1);
+                  stFlipBear = (g_flipDir[i] == -1 && g_flipDir[i-1] == 1);
+                  if(stFlipBull) { bullPts += 2; primaryBull = true; }
+                  if(stFlipBear) { bearPts += 2; primaryBear = true; }
+                  if(!stFlipBull && g_flipDir[i] == -1
+                     && MathAbs(close[i] - g_flipLine[i]) < 0.4 * atrI)
+                     bullPts += 1;
+                  if(!stFlipBear && g_flipDir[i] == 1
+                     && MathAbs(close[i] - g_flipLine[i]) < 0.4 * atrI)
+                     bearPts += 1;
                }
-               bool f7Bull = (close[i] > recentHi + 0.1 * atrI)
-                          || (recentHi - close[i] > 0.5 * atrI);
-               bool f7Bear = (close[i] < recentLo - 0.1 * atrI)
-                          || (close[i] - recentLo > 0.5 * atrI);
 
-               // 8. PREVIOUS BAR NOT DEEP PULLBACK
-               bool f8Bull = (low[i - 1]  > g_ed4[i - 1] - 0.3 * atrI);
-               bool f8Bear = (high[i - 1] < g_ed4[i - 1] + 0.3 * atrI);
+               // --- Signal 4: EMA SLOPE DECELERATION (1 pt) ---
+               if(i >= 4)
+               {
+                  double s0 = g_ed0[i]   - g_ed0[i-1];
+                  double s2 = g_ed0[i-2] - g_ed0[i-3];
+                  if(s2 < -atrI * 0.01 && MathAbs(s0) < MathAbs(s2) * 0.4)
+                     bullPts += 1;
+                  if(s2 > atrI * 0.01 && MathAbs(s0) < MathAbs(s2) * 0.4)
+                     bearPts += 1;
+               }
 
-               // ALL filters must pass
-               bool eBull = trigBull && f1Bull && f2Bull && f3Bull && f4Bull
-                         && f5 && f6Bull && f7Bull && f8Bull;
-               bool eBear = trigBear && f1Bear && f2Bear && f3Bear && f4Bear
-                         && f5 && f6Bear && f7Bear && f8Bear;
+               // --- Signal 5: REVERSAL CANDLE PATTERN (1 pt) ---
+               {
+                  double body = close[i] - open[i];
+                  double rng  = high[i] - low[i];
+                  if(rng > 0)
+                  {
+                     double lWick = MathMin(open[i], close[i]) - low[i];
+                     double uWick = high[i] - MathMax(open[i], close[i]);
+                     bool hammer    = (lWick > rng * 0.6 && MathAbs(body) < rng * 0.35);
+                     bool bullEngf  = (body > 0.3 * atrI && i >= 1
+                                      && open[i] <= close[i-1] && close[i] > open[i-1]);
+                     if(hammer || bullEngf) bullPts += 1;
+                     bool shootStar = (uWick > rng * 0.6 && MathAbs(body) < rng * 0.35);
+                     bool bearEngf  = (-body > 0.3 * atrI && i >= 1
+                                      && open[i] >= close[i-1] && close[i] < open[i-1]);
+                     if(shootStar || bearEngf) bearPts += 1;
+                  }
+               }
+
+               // --- Signal 6: FAST EMA CROSS (1 pt) ---
+               if(i >= 1)
+               {
+                  if(g_ed0[i] > g_ed2[i] && g_ed0[i-1] <= g_ed2[i-1])
+                     bullPts += 1;
+                  if(g_ed0[i] < g_ed2[i] && g_ed0[i-1] >= g_ed2[i-1])
+                     bearPts += 1;
+               }
+
+               // --- Signal 7: VOLUME CLIMAX (1 pt) ---
+               if(i >= 10)
+               {
+                  long avgVol = 0;
+                  for(int k = i - 10; k < i; k++) avgVol += tick_volume[k];
+                  avgVol /= 10;
+                  if(avgVol > 0 && tick_volume[i] > avgVol * 2)
+                  {
+                     if(close[i] > open[i]) bullPts += 1;
+                     if(close[i] < open[i]) bearPts += 1;
+                  }
+               }
+
+               // --- Threshold gating ---
+               int threshold = (InpSensitivity == SENS_CONSERVATIVE) ? 5
+                             : (InpSensitivity == SENS_BALANCED)     ? 3 : 2;
+               bool needPrimary = (InpSensitivity != SENS_AGGRESSIVE);
+
+               bool eBull = inBearEnv && bullPts >= threshold
+                         && (!needPrimary || primaryBull);
+               bool eBear = inBullEnv && bearPts >= threshold
+                         && (!needPrimary || primaryBear);
 
                if(eBull || eBear)
                {
                   g_lastEarlyBar = i;
                   bool eIsBull = eBull;
+                  int eScore = eIsBull ? bullPts : bearPts;
                   color eC   = eIsBull ? C'80,220,255' : C'255,170,80';
                   string eTxt = eIsBull ? "EARLY \x25B2" : "EARLY \x25BC";
                   double ePr = eIsBull ? low[i] : high[i];
-                  int eDot = (stFlipBull || stFlipBear) ? 26 : 22;
+                  bool hasFlip = (eIsBull && stFlipBull) || (!eIsBull && stFlipBear);
+                  int eDot = hasFlip ? 26 : 22;
                   CreateSignalDot("DotEarly" + IntegerToString(i),
                      time[i], ePr, eC, !eIsBull, eDot);
                   double eOfs = (pixToPrice > 0) ? (eDot + 5) * pixToPrice
@@ -2065,12 +2120,10 @@ int OnCalculate(const int rates_total,
                   if(i >= rates_total - 2 && prev_calculated > 0 && time[i] > g_lastNotifyTime)
                   {
                      g_lastNotifyTime = time[i];
-                     // All 8 filters passed, high confidence
-                     int eConf = 70;
-                     if(stFlipBull || stFlipBear) eConf += 12;
-                     if(xemaBull || xemaBear)     eConf += 6;
-                     if(adxCopied > i && adxBuf[i] > 30) eConf += 6;
-                     if(adxCopied > i && adxBuf[i] > 40) eConf += 4;
+                     int eConf = 25 + eScore * 7;
+                     if(hasFlip) eConf += 10;
+                     if(primaryBull || primaryBear) eConf += 8;
+                     if(adxCopied > i && adxBuf[i] > 25) eConf += 5;
                      if(eConf > 95) eConf = 95;
                      bool notifyE = eIsBull ? InpNotifyBull : InpNotifyBear;
                      SendSignalAlert(eIsBull ? "EARLY BULL" : "EARLY BEAR",
