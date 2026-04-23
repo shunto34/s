@@ -117,6 +117,10 @@ input int    InpContCooldown  = 5;        // Continuation Min Bars After Entry
 input bool   InpSessionFilter = false;    // Session Time Filter
 input int    InpActiveStart   = 8;        // Active Session Start (server hour)
 input int    InpActiveEnd     = 20;       // Active Session End (server hour)
+input bool   InpEarlyEntry    = true;     // EARLY Entry Signal (leading)
+input int    InpEarlyCooldown = 8;        // EARLY Signal Cooldown Bars
+input bool   InpExitSTVeto    = true;     // Skip EXIT if Supertrend still in favor
+input int    InpExitADXGate   = 25;       // EXIT requires higher score if ADX above
 
 //--- Ribbon buffers (7 fills x 2 = 14)
 double g_ema1[];
@@ -202,7 +206,8 @@ int g_hStoch     = INVALID_HANDLE;
 int g_hFlipATR   = INVALID_HANDLE;
 double g_flipLine[];
 int    g_flipDir[];
-int    g_lastContBar = -9999;
+int    g_lastContBar  = -9999;
+int    g_lastEarlyBar = -9999;
 
 //+------------------------------------------------------------------+
 //| GEXR Fusion: ATR Supertrend calculation                         |
@@ -1962,6 +1967,76 @@ int OnCalculate(const int rates_total,
             } // passFilter
          }
 
+         //=== EARLY ENTRY SIGNAL: Supertrend flip / fast EMA cross ===
+         // Fires BEFORE full master trend transition for leading detection
+         if(InpEarlyEntry && i > startSig + 5
+            && (i - g_lastEarlyBar) >= InpEarlyCooldown
+            && (i - lastSignalBar) >= InpEarlyCooldown)
+         {
+            bool stFlipBull = false, stFlipBear = false;
+            if(flipCopied > 0 && i < ArraySize(g_flipDir) && i > 0)
+            {
+               stFlipBull = (g_flipDir[i] == 1  && g_flipDir[i - 1] == -1);
+               stFlipBear = (g_flipDir[i] == -1 && g_flipDir[i - 1] == 1);
+            }
+            // Fast EMA cross (EMA5 through EMA21)
+            bool xemaBull = (i > 0 && g_ed0[i] > g_ed3[i] && g_ed0[i - 1] <= g_ed3[i - 1]);
+            bool xemaBear = (i > 0 && g_ed0[i] < g_ed3[i] && g_ed0[i - 1] >= g_ed3[i - 1]);
+
+            bool eBullRaw = (stFlipBull || xemaBull)
+                            && close[i] > open[i]
+                            && close[i] > g_ed0[i];
+            bool eBearRaw = (stFlipBear || xemaBear)
+                            && close[i] < open[i]
+                            && close[i] < g_ed0[i];
+
+            // Momentum confirmation (soft gate — not hard blocking)
+            bool eMomOKBull = true, eMomOKBear = true;
+            if(InpUseMomentum && rsiCopied > i)
+            {
+               eMomOKBull = (rsiBuf[i] > 45);
+               eMomOKBear = (rsiBuf[i] < 55);
+            }
+
+            bool eBull = eBullRaw && eMomOKBull;
+            bool eBear = eBearRaw && eMomOKBear;
+
+            if(eBull || eBear)
+            {
+               g_lastEarlyBar = i;
+               bool eIsBull = eBull;
+               color eC   = eIsBull ? C'80,220,255' : C'255,170,80';
+               string eTxt = eIsBull ? "EARLY \x25B2" : "EARLY \x25BC";
+               double ePr = eIsBull ? low[i] : high[i];
+               int eDot = stFlipBull || stFlipBear ? 24 : 20;
+               CreateSignalDot("DotEarly" + IntegerToString(i),
+                  time[i], ePr, eC, !eIsBull, eDot);
+               double eOfs = (pixToPrice > 0) ? (eDot + 5) * pixToPrice
+                           : ((atrCopied > i && atrBuf[i] > 0) ? atrBuf[i] * 0.7 : _Point * 15);
+               double eLblPr = eIsBull ? (ePr - eOfs) : (ePr + eOfs);
+               CreateSignalLabel("SigEarly" + IntegerToString(i),
+                  time[i], eLblPr, eTxt, eC, !eIsBull, 9);
+
+               if(i >= rates_total - 2 && prev_calculated > 0 && time[i] > g_lastNotifyTime)
+               {
+                  g_lastNotifyTime = time[i];
+                  int eConf = 40;
+                  if(stFlipBull || stFlipBear) eConf += 20;
+                  if(xemaBull || xemaBear)     eConf += 10;
+                  if(InpUseMomentum && rsiCopied > i)
+                  {
+                     if(eIsBull && rsiBuf[i] > 55) eConf += 8;
+                     if(!eIsBull && rsiBuf[i] < 45) eConf += 8;
+                  }
+                  if(adxCopied > i && adxBuf[i] > 25) eConf += 8;
+                  if(eConf > 85) eConf = 85;
+                  bool notifyE = eIsBull ? InpNotifyBull : InpNotifyBear;
+                  SendSignalAlert(eIsBull ? "EARLY BULL" : "EARLY BEAR",
+                                  close[i], notifyE, eConf);
+               }
+            }
+         }
+
          //=== CONTINUATION SIGNAL: pullback to ribbon bounce ===
          if(InpContSignals && prevMaster != 0 && lastSignalBar > 0
             && (i - lastSignalBar) >= InpContCooldown
@@ -2023,7 +2098,24 @@ int OnCalculate(const int rates_total,
             int exitScore = CalcExitScore(isBullPos, i, rates_total,
                                           close, open, high, low, tick_volume,
                                           adxBuf, adxCopied, atrBuf, atrCopied);
-            if(exitScore >= InpExitThreshold)
+
+            // Supertrend veto: don't exit while trend pressure still in favor
+            int effectiveThreshold = InpExitThreshold;
+            if(InpExitSTVeto && flipCopied > 0 && i < ArraySize(g_flipDir))
+            {
+               bool stInFavor = (isBullPos && g_flipDir[i] == 1)
+                             || (!isBullPos && g_flipDir[i] == -1);
+               if(stInFavor) effectiveThreshold = MathMax(InpExitThreshold + 20, 65);
+            }
+            // ADX gate: strong trend requires stronger exit signal
+            if(adxCopied > i && adxBuf[i] > InpExitADXGate)
+               effectiveThreshold = MathMax(effectiveThreshold, 55);
+            // Price confirmation: for bull, close must break below EMA3 (ribbon mid)
+            bool priceConf = true;
+            if(isBullPos && close[i] >= g_ed3[i]) priceConf = false;
+            if(!isBullPos && close[i] <= g_ed3[i]) priceConf = false;
+
+            if(exitScore >= effectiveThreshold && priceConf)
             {
                lastExitBar = i;
                bool isStrong = (exitScore >= 65);
