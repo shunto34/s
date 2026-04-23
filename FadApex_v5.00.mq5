@@ -208,6 +208,7 @@ double g_flipLine[];
 int    g_flipDir[];
 int    g_lastContBar  = -9999;
 int    g_lastEarlyBar = -9999;
+int    g_lastEarlyDir = 0;
 
 //+------------------------------------------------------------------+
 //| GEXR Fusion: ATR Supertrend calculation                         |
@@ -1794,6 +1795,13 @@ int OnCalculate(const int rates_total,
          if((int)g_barTrend2[i] == -1) beCnt++;
 
          bool rBull = (g_ed0[i] > g_ed7[i]);
+         // EARLY acceleration: when EARLY recently fired, accept faster ribbon check
+         if(!rBull && g_lastEarlyDir == 1 && g_lastEarlyBar > 0
+            && (i - g_lastEarlyBar) <= 15 && g_ed0[i] > g_ed4[i])
+            rBull = true;
+         if(rBull && g_lastEarlyDir == -1 && g_lastEarlyBar > 0
+            && (i - g_lastEarlyBar) <= 15 && g_ed0[i] < g_ed4[i])
+            rBull = false;
          bool aBull = (buCnt >= InpTrendConfirm) && rBull;
          bool aBear = (beCnt >= InpTrendConfirm) && !rBull;
 
@@ -1967,243 +1975,195 @@ int OnCalculate(const int rates_total,
             } // passFilter
          }
 
-         //=== EARLY REVERSAL SIGNAL: trend exhaustion & reversal detection ===
-         // Detects reversal onset WITHIN the current trend (before trend change)
-         // Flow: downtrend → EARLY BULL fires → price reverses → BULL S/A/B confirms
-         if(InpEarlyEntry && i > startSig + 20 && i >= 10
+         //=== EARLY REVERSAL: W-Bottom / M-Top structural pattern detection ===
+         // Completely different approach: detect PRICE STRUCTURE, not indicators.
+         // W-Bottom: base → reaction rally → higher low → breakout
+         // M-Top:    peak → reaction drop  → lower high → breakdown
+         // EARLY fires ONLY when the structural pattern completes.
+         if(InpEarlyEntry && i > startSig + 20 && i >= 15
             && (i - g_lastEarlyBar) >= InpEarlyCooldown
             && (i - lastSignalBar) >= (InpEarlyCooldown / 2))
          {
-            bool inBearEnv = (prevMaster == -1)
-                          || (g_ed0[i] < g_ed7[i] && g_ed0[i-1] < g_ed7[i-1]);
-            bool inBullEnv = (prevMaster == 1)
-                          || (g_ed0[i] > g_ed7[i] && g_ed0[i-1] > g_ed7[i-1]);
+            double atrI = (atrCopied > i && atrBuf[i] > 0) ? atrBuf[i] : _Point * 100;
+            int searchLen = MathMin(30, i - startSig);
+            bool earlyBull = false, earlyBear = false;
+            int  earlyConf = 0;
+            bool earlyFlip = false;
 
-            if(inBearEnv || inBullEnv)
+            // ============ W-BOTTOM (EARLY BULL) ============
+            // Context: bearish environment (master bear OR ribbon bear)
+            bool bearCtx = (prevMaster == -1) || (g_ed0[i] < g_ed7[i]);
+            if(bearCtx)
             {
-               double atrI = (atrCopied > i && atrBuf[i] > 0) ? atrBuf[i] : _Point * 100;
-
-               //==================================================
-               // HARD GATES — block premature reversal signals
-               //==================================================
-
-               // GATE 1: EMA ribbon not falling/rising too steeply
-               // Reasoning: fighting strong trends = ダマシ. Wait for slowdown.
-               double ribSlope = (i >= 5) ? (g_ed3[i] - g_ed3[i-5]) / 5.0 : 0.0;
-               double slopeThr = atrI * 0.18;
-               bool g1Bull = (ribSlope > -slopeThr);  // bear-ribbon not too steep DOWN
-               bool g1Bear = (ribSlope <  slopeThr);  // bull-ribbon not too steep UP
-
-               // GATE 2: Supertrend distance — price not too far from flip line
-               // If price is >2 ATR away from flip line, trend has too much momentum
-               bool g2Bull = true, g2Bear = true;
-               if(flipCopied > 0 && i < ArraySize(g_flipDir))
+               // Phase 1 — BASE: find the lowest low in lookback (at least 4 bars ago)
+               double baseLow = DBL_MAX;
+               int baseIdx = -1;
+               for(int k = i - 4; k >= MathMax(0, i - searchLen); k--)
                {
-                  if(g_flipDir[i] == -1 && (g_flipLine[i] - close[i]) > 2.0 * atrI)
-                     g2Bull = false;
-                  if(g_flipDir[i] == 1 && (close[i] - g_flipLine[i]) > 2.0 * atrI)
-                     g2Bear = false;
+                  if(low[k] < baseLow) { baseLow = low[k]; baseIdx = k; }
                }
 
-               // GATE 3: Market structure — higher low (BULL) / lower high (BEAR)
-               // Recent 6 bars vs 7-15 bars ago must show structure shift
-               bool g3Bull = false, g3Bear = false;
-               if(i >= 15)
+               if(baseIdx >= 0 && (i - baseIdx) >= 4)
                {
-                  double lowR = DBL_MAX, lowP = DBL_MAX;
-                  double hiR  = 0,       hiP  = 0;
-                  for(int k = i - 1; k >= i - 6; k--)
+                  // Phase 2 — REACTION: price rallied from base (range > 0.5 ATR)
+                  double reactHi = 0;
+                  for(int k = baseIdx + 1; k <= i; k++)
+                     reactHi = MathMax(reactHi, high[k]);
+                  double range = reactHi - baseLow;
+                  bool p2 = (range >= 0.5 * atrI);
+
+                  // Phase 3 — HIGHER LOW: recent 5 bars' minimum > baseLow
+                  double recLow = low[i];
+                  for(int k = i - 1; k >= MathMax(baseIdx + 2, i - 5); k--)
+                     recLow = MathMin(recLow, low[k]);
+                  bool p3 = (recLow > baseLow + 0.1 * atrI);
+
+                  // Phase 4 — BREAKOUT: bullish bar, close above EMA5, momentum
+                  bool p4 = (close[i] > open[i])
+                         && (close[i] > g_ed0[i])
+                         && (close[i] > close[i-1]);
+
+                  // Phase 5 — MOMENTUM (at least 1 of 4 confirmations)
+                  int momCnt = 0;
+                  if(rsiCopied > i && rsiBuf[i] > 45 && rsiBuf[i] > rsiBuf[i-1])
+                     momCnt++;
+                  if(stochCopied > i && stochKBuf[i] > stochDBuf[i])
+                     momCnt++;
+                  bool stFB = false;
+                  if(flipCopied > 0 && i < ArraySize(g_flipDir) && i >= 1)
                   {
-                     if(low[k]  < lowR) lowR = low[k];
-                     if(high[k] > hiR)  hiR  = high[k];
+                     stFB = (g_flipDir[i] == 1 && g_flipDir[i-1] == -1);
+                     if(stFB || g_flipDir[i] == 1) momCnt++;
                   }
-                  for(int k = i - 7; k >= i - 15; k--)
+                  if(g_ed0[i] > g_ed0[i-1] && g_ed0[i-1] <= g_ed0[i-2])
+                     momCnt++;
+                  bool p5 = (momCnt >= 1);
+
+                  // Phase 6 — SLOPE GATE: ribbon not falling too steeply
+                  double ribSlp = (i >= 5) ? (g_ed3[i] - g_ed3[i-5]) / 5.0 : 0.0;
+                  bool p6 = (ribSlp > -atrI * 0.2);
+
+                  // Sensitivity adjustments
+                  if(InpSensitivity == SENS_AGGRESSIVE)
+                     earlyBull = p2 && p3 && p4 && p6;       // skip p5
+                  else if(InpSensitivity == SENS_BALANCED)
+                     earlyBull = p2 && p3 && p4 && p5 && p6;
+                  else
+                     earlyBull = p2 && p3 && p4 && p5 && p6 && (momCnt >= 2);
+
+                  if(earlyBull)
                   {
-                     if(low[k]  < lowP) lowP = low[k];
-                     if(high[k] > hiP)  hiP  = high[k];
-                  }
-                  g3Bull = (lowR > lowP + 0.12 * atrI);  // higher low
-                  g3Bear = (hiR  < hiP  - 0.12 * atrI);  // lower high
-               }
-
-               // GATE 4: Price reversal confirmation — last bar confirms direction
-               bool g4Bull = false, g4Bear = false;
-               if(i >= 3)
-               {
-                  double avgLo3 = (low[i-1]  + low[i-2]  + low[i-3])  / 3.0;
-                  double avgHi3 = (high[i-1] + high[i-2] + high[i-3]) / 3.0;
-                  g4Bull = (close[i] > close[i-1])
-                        && (low[i] >= low[i-1] - 0.2 * atrI)
-                        && (close[i] > avgLo3 + 0.1 * atrI);
-                  g4Bear = (close[i] < close[i-1])
-                        && (high[i] <= high[i-1] + 0.2 * atrI)
-                        && (close[i] < avgHi3 - 0.1 * atrI);
-               }
-
-               // Aggressive sensitivity: G3 OR G4 is enough
-               // Balanced/Conservative: ALL four gates required
-               bool hardBull, hardBear;
-               if(InpSensitivity == SENS_AGGRESSIVE)
-               {
-                  hardBull = g1Bull && g2Bull && (g3Bull || g4Bull);
-                  hardBear = g1Bear && g2Bear && (g3Bear || g4Bear);
-               }
-               else
-               {
-                  hardBull = g1Bull && g2Bull && g3Bull && g4Bull;
-                  hardBear = g1Bear && g2Bear && g3Bear && g4Bear;
-               }
-
-               int bullPts = 0, bearPts = 0;
-               bool primaryBull = false, primaryBear = false;
-
-               // --- Signal 1: RSI DIVERGENCE (2 pts, primary) ---
-               if(rsiCopied > i && i >= 15)
-               {
-                  int lb = MathMin(20, i - startSig);
-                  double pLow = DBL_MAX, rLow = 999;
-                  double pHi  = 0,       rHi  = -999;
-                  for(int k = i - 5; k >= MathMax(0, i - lb); k--)
-                  {
-                     if(low[k]  < pLow) { pLow = low[k];  rLow = rsiBuf[k]; }
-                     if(high[k] > pHi)  { pHi  = high[k]; rHi  = rsiBuf[k]; }
-                  }
-                  if(low[i] <= pLow + 0.15 * atrI && rsiBuf[i] > rLow + 3)
-                  { bullPts += 2; primaryBull = true; }
-                  if(rsiBuf[i] < 35 && rsiBuf[i] > rsiBuf[i-1]
-                     && rsiBuf[i-1] <= rsiBuf[i-2])
-                  { bullPts += 1; primaryBull = true; }
-                  if(high[i] >= pHi - 0.15 * atrI && rsiBuf[i] < rHi - 3)
-                  { bearPts += 2; primaryBear = true; }
-                  if(rsiBuf[i] > 65 && rsiBuf[i] < rsiBuf[i-1]
-                     && rsiBuf[i-1] >= rsiBuf[i-2])
-                  { bearPts += 1; primaryBear = true; }
-               }
-
-               // --- Signal 2: STOCHASTIC REVERSAL FROM EXTREME (2 pts, primary) ---
-               if(stochCopied > i && i >= 2)
-               {
-                  bool kxUpOS = (stochKBuf[i] > stochDBuf[i])
-                             && (stochKBuf[i-1] <= stochDBuf[i-1])
-                             && (stochKBuf[i] < 35 || stochKBuf[i-1] < 25);
-                  if(kxUpOS) { bullPts += 2; primaryBull = true; }
-                  bool kxDnOB = (stochKBuf[i] < stochDBuf[i])
-                             && (stochKBuf[i-1] >= stochDBuf[i-1])
-                             && (stochKBuf[i] > 65 || stochKBuf[i-1] > 75);
-                  if(kxDnOB) { bearPts += 2; primaryBear = true; }
-               }
-
-               // --- Signal 3: SUPERTREND FLIP (2 pts, primary) / PROXIMITY (1 pt) ---
-               bool stFlipBull = false, stFlipBear = false;
-               if(flipCopied > 0 && i < ArraySize(g_flipDir) && i >= 1)
-               {
-                  stFlipBull = (g_flipDir[i] == 1  && g_flipDir[i-1] == -1);
-                  stFlipBear = (g_flipDir[i] == -1 && g_flipDir[i-1] == 1);
-                  if(stFlipBull) { bullPts += 2; primaryBull = true; }
-                  if(stFlipBear) { bearPts += 2; primaryBear = true; }
-                  if(!stFlipBull && g_flipDir[i] == -1
-                     && MathAbs(close[i] - g_flipLine[i]) < 0.4 * atrI)
-                     bullPts += 1;
-                  if(!stFlipBear && g_flipDir[i] == 1
-                     && MathAbs(close[i] - g_flipLine[i]) < 0.4 * atrI)
-                     bearPts += 1;
-               }
-
-               // --- Signal 4: EMA SLOPE DECELERATION (1 pt) ---
-               if(i >= 4)
-               {
-                  double s0 = g_ed0[i]   - g_ed0[i-1];
-                  double s2 = g_ed0[i-2] - g_ed0[i-3];
-                  if(s2 < -atrI * 0.01 && MathAbs(s0) < MathAbs(s2) * 0.4)
-                     bullPts += 1;
-                  if(s2 > atrI * 0.01 && MathAbs(s0) < MathAbs(s2) * 0.4)
-                     bearPts += 1;
-               }
-
-               // --- Signal 5: REVERSAL CANDLE PATTERN (1 pt) ---
-               {
-                  double body = close[i] - open[i];
-                  double rng  = high[i] - low[i];
-                  if(rng > 0)
-                  {
-                     double lWick = MathMin(open[i], close[i]) - low[i];
-                     double uWick = high[i] - MathMax(open[i], close[i]);
-                     bool hammer    = (lWick > rng * 0.6 && MathAbs(body) < rng * 0.35);
-                     bool bullEngf  = (body > 0.3 * atrI && i >= 1
-                                      && open[i] <= close[i-1] && close[i] > open[i-1]);
-                     if(hammer || bullEngf) bullPts += 1;
-                     bool shootStar = (uWick > rng * 0.6 && MathAbs(body) < rng * 0.35);
-                     bool bearEngf  = (-body > 0.3 * atrI && i >= 1
-                                      && open[i] >= close[i-1] && close[i] < open[i-1]);
-                     if(shootStar || bearEngf) bearPts += 1;
+                     earlyFlip = stFB;
+                     earlyConf = 50;
+                     if(range > atrI)       earlyConf += 8;
+                     if(recLow > baseLow + 0.3 * atrI) earlyConf += 8;
+                     if(momCnt >= 2)        earlyConf += 7;
+                     if(momCnt >= 3)        earlyConf += 5;
+                     if(stFB)               earlyConf += 8;
+                     if(adxCopied > i && adxBuf[i] > 20) earlyConf += 4;
                   }
                }
+            }
 
-               // --- Signal 6: FAST EMA CROSS (1 pt) ---
-               if(i >= 1)
+            // ============ M-TOP (EARLY BEAR) ============
+            // Context: bullish environment
+            bool bullCtx = (prevMaster == 1) || (g_ed0[i] > g_ed7[i]);
+            if(bullCtx && !earlyBull)
+            {
+               // Phase 1 — PEAK: highest high in lookback
+               double peakHi = 0;
+               int peakIdx = -1;
+               for(int k = i - 4; k >= MathMax(0, i - searchLen); k--)
                {
-                  if(g_ed0[i] > g_ed2[i] && g_ed0[i-1] <= g_ed2[i-1])
-                     bullPts += 1;
-                  if(g_ed0[i] < g_ed2[i] && g_ed0[i-1] >= g_ed2[i-1])
-                     bearPts += 1;
+                  if(high[k] > peakHi) { peakHi = high[k]; peakIdx = k; }
                }
 
-               // --- Signal 7: VOLUME CLIMAX (1 pt) ---
-               if(i >= 10)
+               if(peakIdx >= 0 && (i - peakIdx) >= 4)
                {
-                  long avgVol = 0;
-                  for(int k = i - 10; k < i; k++) avgVol += tick_volume[k];
-                  avgVol /= 10;
-                  if(avgVol > 0 && tick_volume[i] > avgVol * 2)
+                  // Phase 2 — REACTION: price dropped from peak (range > 0.5 ATR)
+                  double reactLo = DBL_MAX;
+                  for(int k = peakIdx + 1; k <= i; k++)
+                     reactLo = MathMin(reactLo, low[k]);
+                  double range = peakHi - reactLo;
+                  bool p2 = (range >= 0.5 * atrI);
+
+                  // Phase 3 — LOWER HIGH: recent 5 bars' max < peakHi
+                  double recHi = high[i];
+                  for(int k = i - 1; k >= MathMax(peakIdx + 2, i - 5); k--)
+                     recHi = MathMax(recHi, high[k]);
+                  bool p3 = (recHi < peakHi - 0.1 * atrI);
+
+                  // Phase 4 — BREAKDOWN: bearish bar, close below EMA5
+                  bool p4 = (close[i] < open[i])
+                         && (close[i] < g_ed0[i])
+                         && (close[i] < close[i-1]);
+
+                  // Phase 5 — MOMENTUM
+                  int momCnt = 0;
+                  if(rsiCopied > i && rsiBuf[i] < 55 && rsiBuf[i] < rsiBuf[i-1])
+                     momCnt++;
+                  if(stochCopied > i && stochKBuf[i] < stochDBuf[i])
+                     momCnt++;
+                  bool stFB = false;
+                  if(flipCopied > 0 && i < ArraySize(g_flipDir) && i >= 1)
                   {
-                     if(close[i] > open[i]) bullPts += 1;
-                     if(close[i] < open[i]) bearPts += 1;
+                     stFB = (g_flipDir[i] == -1 && g_flipDir[i-1] == 1);
+                     if(stFB || g_flipDir[i] == -1) momCnt++;
+                  }
+                  if(g_ed0[i] < g_ed0[i-1] && g_ed0[i-1] >= g_ed0[i-2])
+                     momCnt++;
+                  bool p5 = (momCnt >= 1);
+
+                  // Phase 6 — SLOPE GATE
+                  double ribSlp = (i >= 5) ? (g_ed3[i] - g_ed3[i-5]) / 5.0 : 0.0;
+                  bool p6 = (ribSlp < atrI * 0.2);
+
+                  if(InpSensitivity == SENS_AGGRESSIVE)
+                     earlyBear = p2 && p3 && p4 && p6;
+                  else if(InpSensitivity == SENS_BALANCED)
+                     earlyBear = p2 && p3 && p4 && p5 && p6;
+                  else
+                     earlyBear = p2 && p3 && p4 && p5 && p6 && (momCnt >= 2);
+
+                  if(earlyBear)
+                  {
+                     earlyFlip = stFB;
+                     earlyConf = 50;
+                     if(range > atrI)       earlyConf += 8;
+                     if(recHi < peakHi - 0.3 * atrI) earlyConf += 8;
+                     if(momCnt >= 2)        earlyConf += 7;
+                     if(momCnt >= 3)        earlyConf += 5;
+                     if(stFB)               earlyConf += 8;
+                     if(adxCopied > i && adxBuf[i] > 20) earlyConf += 4;
                   }
                }
+            }
 
-               // --- Threshold gating ---
-               int threshold = (InpSensitivity == SENS_CONSERVATIVE) ? 5
-                             : (InpSensitivity == SENS_BALANCED)     ? 3 : 2;
-               bool needPrimary = (InpSensitivity != SENS_AGGRESSIVE);
+            // ============ RENDER + NOTIFY ============
+            if(earlyBull || earlyBear)
+            {
+               g_lastEarlyBar = i;
+               g_lastEarlyDir = earlyBull ? 1 : -1;
+               bool eIsBull = earlyBull;
+               if(earlyConf > 95) earlyConf = 95;
+               color eC   = eIsBull ? C'80,220,255' : C'255,170,80';
+               string eTxt = eIsBull ? "EARLY \x25B2" : "EARLY \x25BC";
+               double ePr = eIsBull ? low[i] : high[i];
+               int eDot = earlyFlip ? 26 : 22;
+               CreateSignalDot("DotEarly" + IntegerToString(i),
+                  time[i], ePr, eC, !eIsBull, eDot);
+               double eOfs = (pixToPrice > 0) ? (eDot + 5) * pixToPrice
+                           : (atrI > 0 ? atrI * 0.7 : _Point * 15);
+               double eLblPr = eIsBull ? (ePr - eOfs) : (ePr + eOfs);
+               CreateSignalLabel("SigEarly" + IntegerToString(i),
+                  time[i], eLblPr, eTxt, eC, !eIsBull, 9);
 
-               bool eBull = inBearEnv && hardBull && bullPts >= threshold
-                         && (!needPrimary || primaryBull);
-               bool eBear = inBullEnv && hardBear && bearPts >= threshold
-                         && (!needPrimary || primaryBear);
-
-               if(eBull || eBear)
+               if(i >= rates_total - 2 && prev_calculated > 0 && time[i] > g_lastNotifyTime)
                {
-                  g_lastEarlyBar = i;
-                  bool eIsBull = eBull;
-                  int eScore = eIsBull ? bullPts : bearPts;
-                  color eC   = eIsBull ? C'80,220,255' : C'255,170,80';
-                  string eTxt = eIsBull ? "EARLY \x25B2" : "EARLY \x25BC";
-                  double ePr = eIsBull ? low[i] : high[i];
-                  bool hasFlip = (eIsBull && stFlipBull) || (!eIsBull && stFlipBear);
-                  int eDot = hasFlip ? 26 : 22;
-                  CreateSignalDot("DotEarly" + IntegerToString(i),
-                     time[i], ePr, eC, !eIsBull, eDot);
-                  double eOfs = (pixToPrice > 0) ? (eDot + 5) * pixToPrice
-                              : ((atrCopied > i && atrBuf[i] > 0) ? atrBuf[i] * 0.7 : _Point * 15);
-                  double eLblPr = eIsBull ? (ePr - eOfs) : (ePr + eOfs);
-                  CreateSignalLabel("SigEarly" + IntegerToString(i),
-                     time[i], eLblPr, eTxt, eC, !eIsBull, 9);
-
-                  if(i >= rates_total - 2 && prev_calculated > 0 && time[i] > g_lastNotifyTime)
-                  {
-                     g_lastNotifyTime = time[i];
-                     int eConf = 40 + eScore * 6;
-                     if(hasFlip) eConf += 10;
-                     if(primaryBull || primaryBear) eConf += 8;
-                     if(adxCopied > i && adxBuf[i] > 25) eConf += 5;
-                     // Structure + price reversal both confirmed = high confidence
-                     bool allGates = eIsBull ? (g3Bull && g4Bull) : (g3Bear && g4Bear);
-                     if(allGates) eConf += 7;
-                     if(eConf > 95) eConf = 95;
-                     bool notifyE = eIsBull ? InpNotifyBull : InpNotifyBear;
-                     SendSignalAlert(eIsBull ? "EARLY BULL" : "EARLY BEAR",
-                                     close[i], notifyE, eConf);
-                  }
+                  g_lastNotifyTime = time[i];
+                  bool notifyE = eIsBull ? InpNotifyBull : InpNotifyBear;
+                  SendSignalAlert(eIsBull ? "EARLY BULL" : "EARLY BEAR",
+                                  close[i], notifyE, earlyConf);
                }
             }
          }
