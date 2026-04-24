@@ -1730,7 +1730,6 @@ int OnCalculate(const int rates_total,
             if(curWidth > 0 && minW < curWidth * 0.5) score++;
 
             // Rank: S(3-4), A(2), B(0-1)
-            // Rank: S(3-4), A(2), B(0-1) — all ranks show dot + text
             string rank = (score >= 3) ? "S" : (score == 2) ? "A" : "B";
 
             if(isBull)
@@ -1835,7 +1834,7 @@ int OnCalculate(const int rates_total,
       if(pendSigI >= 0)
       {
          g_lastNotifyTime = time[pendSigI];
-         string r2 = (pendSigScore >= 3) ? "S" : (pendSigScore == 2) ? "A" : "B";
+         string r2 = (pendSigScore >= 3) ? "S \x2605" : (pendSigScore == 2) ? "A" : "B";
          int conf = 20 + pendSigScore * 18;
          if(adxCopied > pendSigI && adxBuf[pendSigI] > 30) conf += 8;
          if(adxCopied > pendSigI && adxBuf[pendSigI] > 40) conf += 4;
