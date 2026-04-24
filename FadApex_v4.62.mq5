@@ -1454,39 +1454,40 @@ void ProcessHTF(int tfIdx, int lb,
                   chartTime[i], chartHigh[i],
                   "M", C'255,80,150', true);
 
-            // MSS/BOS push notification (latest bars only, per-TF duplicate prevention)
-            datetime lastMSS = (tfIdx == 0) ? g_lastMSSNotify0 : (tfIdx == 1) ? g_lastMSSNotify1 : g_lastMSSNotify2;
-            if(!fullRecalc && i >= chartTotal - 5 && chartTime[i] > lastMSS)
+         }
+
+         // MSS/BOS push notification — outside isRecent so HTF events are not missed
+         datetime lastMSS = (tfIdx == 0) ? g_lastMSSNotify0 : (tfIdx == 1) ? g_lastMSSNotify1 : g_lastMSSNotify2;
+         if(!fullRecalc && chartTime[i] > lastMSS)
+         {
+            string mssTypes[];
+            int mssCount = 0;
+            ArrayResize(mssTypes, 4);
+            if(mBu && InpNotifyMSS) { mssTypes[mssCount] = "MSS Bull"; mssCount++; }
+            if(mBe && InpNotifyMSS) { mssTypes[mssCount] = "MSS Bear"; mssCount++; }
+            if(bBu && InpNotifyBOS) { mssTypes[mssCount] = "BOS Bull"; mssCount++; }
+            if(bBe && InpNotifyBOS) { mssTypes[mssCount] = "BOS Bear"; mssCount++; }
+
+            if(mssCount > 0)
             {
-               string mssTypes[];
-               int mssCount = 0;
-               ArrayResize(mssTypes, 4);
-               if(mBu && InpNotifyMSS) { mssTypes[mssCount] = "MSS Bull"; mssCount++; }
-               if(mBe && InpNotifyMSS) { mssTypes[mssCount] = "MSS Bear"; mssCount++; }
-               if(bBu && InpNotifyBOS) { mssTypes[mssCount] = "BOS Bull"; mssCount++; }
-               if(bBe && InpNotifyBOS) { mssTypes[mssCount] = "BOS Bear"; mssCount++; }
+               if(tfIdx == 0) g_lastMSSNotify0 = chartTime[i];
+               else if(tfIdx == 1) g_lastMSSNotify1 = chartTime[i];
+               else g_lastMSSNotify2 = chartTime[i];
 
-               if(mssCount > 0)
+               string tfStr2 = EnumToString(Period());
+               StringReplace(tfStr2, "PERIOD_", "");
+               for(int m = 0; m < mssCount; m++)
                {
-                  if(tfIdx == 0) g_lastMSSNotify0 = chartTime[i];
-                  else if(tfIdx == 1) g_lastMSSNotify1 = chartTime[i];
-                  else g_lastMSSNotify2 = chartTime[i];
-
-                  string tfStr2 = EnumToString(Period());
-                  StringReplace(tfStr2, "PERIOD_", "");
-                  for(int m = 0; m < mssCount; m++)
-                  {
-                     bool isMSStype = (StringFind(mssTypes[m], "MSS") >= 0);
-                     string structArrow = isMSStype ? "\x00BB " : "\x203A ";
-                     int structConf = isMSStype ? 85 : 65;
-                     string mssMsg = StringFormat("[%s] %s%s %s [%d%%] | %s | %s",
-                        _Symbol, structArrow, mssTypes[m], tfName, structConf, tfStr2,
-                        TimeToString(TimeCurrent(), TIME_DATE|TIME_MINUTES));
-                     Alert(mssMsg);
-                     if(InpPushNotify)
-                        SendNotification(mssMsg);
-                     Print("FAD APEX MSS: ", mssMsg);
-                  }
+                  bool isMSStype = (StringFind(mssTypes[m], "MSS") >= 0);
+                  string structArrow = isMSStype ? "\x00BB " : "\x203A ";
+                  int structConf = isMSStype ? 85 : 65;
+                  string mssMsg = StringFormat("[%s] %s%s %s [%d%%] | %s | %s",
+                     _Symbol, structArrow, mssTypes[m], tfName, structConf, tfStr2,
+                     TimeToString(TimeCurrent(), TIME_DATE|TIME_MINUTES));
+                  Alert(mssMsg);
+                  if(InpPushNotify)
+                     SendNotification(mssMsg);
+                  Print("FAD APEX MSS: ", mssMsg);
                }
             }
          }
