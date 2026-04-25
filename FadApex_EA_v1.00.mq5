@@ -1,10 +1,11 @@
 //+------------------------------------------------------------------+
-//| FadApex EA v1.00 - Gold M1 Auto-Trader                           |
-//| Based on FadApex v4.62 indicator signal logic                    |
-//| Optimized for XAUUSD M1 scalping                                 |
+//| FadApex EA v1.10 - Gold M1 Asymmetric Runner                     |
+//| Strategy: Tiny losses, big winners (let profits run)             |
+//| Quality-only entries: S-rank with pullback + momentum confirm    |
+//| Exit: swing-SL, multi-stage trailing, partial 30% at 2R          |
 //+------------------------------------------------------------------+
 #property copyright "FadApex EA"
-#property version   "1.00"
+#property version   "1.10"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -15,47 +16,60 @@ CPositionInfo g_pos;
 
 //=== INPUTS: Trading ===
 input group "=== Trading ==="
-input long   InpMagic        = 462001;
-input double InpRiskPercent  = 0.5;       // Risk per trade (%)
+input long   InpMagic        = 462010;
+input double InpRiskPercent  = 0.3;       // Risk per trade (%) - smaller for survival
 input int    InpMaxSlippage  = 30;        // Max slippage in points
-input int    InpMaxSpreadPts = 300;       // Max spread (Gold: 300 pts = 30 pips)
+input int    InpMaxSpreadPts = 200;       // Max spread (Gold: 200pts) - stricter
 
 //=== INPUTS: Risk Management ===
 input group "=== Risk Management ==="
-input double InpMaxDailyDD     = 2.5;     // Max daily drawdown (%)
-input int    InpMaxConsecLoss  = 4;       // Max consecutive losses before cooldown
-input int    InpCooldownHours  = 6;       // Cooldown duration (hours)
+input double InpMaxDailyDD     = 2.0;     // Max daily drawdown (%)
+input int    InpMaxConsecLoss  = 3;       // Max consecutive losses before cooldown
+input int    InpCooldownHours  = 8;       // Cooldown duration (hours)
 input bool   InpFridayFlat     = true;    // Close all positions Friday end
 
-//=== INPUTS: Entry Filters ===
-input group "=== Entry Filters ==="
-input bool   InpEntryRankS    = true;     // Trade Rank S signals
-input bool   InpEntryRankA    = true;     // Trade Rank A signals
-input bool   InpEntryRankB    = false;    // Trade Rank B signals
-input int    InpMinADX        = 22;       // Min ADX for entry
-input int    InpMinATRPoints  = 300;      // Min ATR (Gold: 300 pts = 30 pips)
+//=== INPUTS: Entry Quality (Asymmetric Runner) ===
+input group "=== Entry Quality ==="
+input bool   InpEntryRankS    = true;     // Trade Rank S signals (score >= 3)
+input bool   InpEntryRankA    = false;    // Trade Rank A signals (score 2) - DEFAULT OFF
+input bool   InpEntryRankB    = false;    // Trade Rank B signals (score <= 1)
+input int    InpMinADX        = 28;       // Min ADX (28 = strong trend)
+input int    InpMinATRPoints  = 400;      // Min ATR (40 pips on Gold)
+input bool   InpRequirePullback = true;   // Require pullback + bounce pattern
+input int    InpPullbackBars    = 8;      // Lookback for pullback detection
+input double InpMaxDistFromEMA  = 1.5;    // Max ATR-distance from EMA21 at entry
+input bool   InpRequireMomentumCandle = true; // Strong close in trend direction
+input bool   InpRequireVolumeBoost    = true; // Volume above 20-bar avg
 
-//=== INPUTS: SL/TP (ATR-based) ===
-input group "=== SL/TP ==="
-input double InpSLAtrMult     = 1.5;      // SL = ATR x this
-input double InpTP1AtrMult    = 1.2;      // TP1 = ATR x this (50% close)
-input int    InpTP1ClosePct   = 50;       // % closed at TP1
-input double InpTP2AtrMult    = 3.0;      // TP2 = ATR x this (remaining close)
-input bool   InpUseTrailing   = true;     // Use trailing stop after TP1
-input double InpTrailAtrMult  = 1.5;      // Trail distance = ATR x this
-input int    InpMinSLPoints   = 300;      // Min SL distance (Gold: 30 pips)
-input int    InpMaxSLPoints   = 2000;     // Max SL distance (Gold: 200 pips)
+//=== INPUTS: SL/TP (Asymmetric: tight SL, runner TP) ===
+input group "=== SL/TP (Asymmetric) ==="
+input bool   InpUseSwingSL     = true;    // Use swing-point SL (tighter, structural)
+input int    InpSwingSLBars    = 5;       // Look back N bars for swing low/high
+input double InpSwingSLBufATR  = 0.3;     // Buffer beyond swing = ATR x this
+input double InpSLAtrMult      = 1.0;     // Fallback SL = ATR x this (was 1.5)
+input double InpTP1RR          = 2.0;     // TP1 = R x this (close 30%)
+input int    InpTP1ClosePct    = 30;      // % closed at TP1 (was 50)
+input double InpTP2RR          = 6.0;     // Hard TP2 ceiling = R x this
+input bool   InpUseTrailing    = true;    // Multi-stage trailing
+input double InpTrailStartRR   = 2.0;     // Start trailing after this RR
+input double InpTrailDistRR    = 1.2;     // Trail distance = R x this (initial)
+input double InpTightTrailRR   = 4.0;     // Tighter trail after this profit (RR)
+input double InpTightTrailDist = 0.7;     // Tight trail distance = R x this
+input int    InpMinSLPoints    = 250;     // Min SL distance (25 pips)
+input int    InpMaxSLPoints    = 1500;    // Max SL distance (150 pips)
 
 //=== INPUTS: Time Filter ===
 input group "=== Time Filter ==="
 input bool   InpUseTimeFilter = true;     // Use time filter
-input int    InpStartHour     = 13;       // Trading start hour (server time)
-input int    InpEndHour       = 21;       // Trading end hour
+input int    InpStartHour     = 14;       // Trading start (server time, GMT+2/+3 for XM)
+input int    InpEndHour       = 20;       // Trading end (avoid late thin liquidity)
+input bool   InpAvoidNewsHour = true;     // Skip first 5 min of each hour
 
 //=== INPUTS: Exit Rules ===
 input group "=== Exit Rules ==="
-input bool   InpExitOnReverse  = true;    // Close on opposite signal
+input bool   InpExitOnReverse  = true;    // Close on opposite S-rank signal only
 input bool   InpExitOnSignal   = true;    // Close on EXIT signal
+input int    InpMaxBarsInTrade = 120;     // Force close after N bars (2hrs M1)
 
 //=== INPUTS: Indicator Params ===
 input group "=== Signal Logic (v4.62) ==="
@@ -96,15 +110,21 @@ bool     g_tp1Hit        = false;
 double   g_entryPrice    = 0;
 double   g_initialSL     = 0;
 double   g_atrAtEntry    = 0;
+double   g_initialRiskPts = 0;          // Distance entry->SL in points (for RR calc)
+datetime g_entryBarTime  = 0;           // For max-bars-in-trade timeout
+bool     g_tightTrailOn  = false;       // Stage-2 trailing engaged
 
 //=== Signal info struct ===
 struct SignalResult
 {
-   int direction;   // 1=BULL, -1=BEAR, 0=none
-   int score;       // 0-4
-   string rank;     // "S", "A", "B"
+   int direction;     // 1=BULL, -1=BEAR, 0=none
+   int score;         // 0-4
+   string rank;       // "S", "A", "B"
    bool hasExit;
-   int exitScore;   // 0-100
+   int exitScore;     // 0-100
+   bool qualityPass;  // Passed pullback / momentum / volume filter
+   double swingSL;    // Swing-based SL price (0 if N/A)
+   double atrAtSig;   // ATR at signal bar
 };
 
 //+------------------------------------------------------------------+
@@ -189,6 +209,14 @@ void ScanExistingPosition()
          g_initialSL     = g_pos.StopLoss();
          // EA restart: skip TP1 partial (assume already done or skip safely)
          g_tp1Hit        = true;
+         g_tightTrailOn  = true;  // Conservative: assume already in advanced trail
+         g_entryBarTime  = (datetime)g_pos.Time();
+         // Initial risk = distance from entry to current SL
+         double pt = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+         if(g_initialSL > 0 && pt > 0)
+            g_initialRiskPts = MathAbs(g_entryPrice - g_initialSL) / pt;
+         else
+            g_initialRiskPts = 0;
          // Use current ATR as fallback for trailing distance
          double atrArr[];
          if(CopyBuffer(g_hATR, 0, 1, 1, atrArr) == 1)
@@ -196,7 +224,8 @@ void ScanExistingPosition()
          else
             g_atrAtEntry = 0;
          Print("Reattached existing position ticket=", g_currentTicket,
-               " bull=", g_currentBull, " ATR=", g_atrAtEntry);
+               " bull=", g_currentBull, " ATR=", g_atrAtEntry,
+               " RiskPts=", g_initialRiskPts);
          return;
       }
    }
@@ -343,6 +372,7 @@ SignalResult ComputeSignal()
    SignalResult sig;
    sig.direction = 0; sig.score = 0; sig.rank = "";
    sig.hasExit = false; sig.exitScore = 0;
+   sig.qualityPass = false; sig.swingSL = 0; sig.atrAtSig = 0;
 
    int rates_total = Bars(_Symbol, PERIOD_CURRENT);
    int need = 600;
@@ -486,6 +516,14 @@ SignalResult ComputeSignal()
       sig.direction = sigBullFinal ? 1 : -1;
       sig.score     = sigScoreFinal;
       sig.rank      = (sigScoreFinal >= 3) ? "S" : (sigScoreFinal == 2) ? "A" : "B";
+      sig.atrAtSig  = atrBuf[idx];
+      // Quality filter (pullback + momentum + volume)
+      sig.qualityPass = PassesQualityFilter(sigBullFinal, idx,
+                                             open, high, low, close,
+                                             tick_vol, e3, atrBuf);
+      // Swing-based SL
+      if(InpUseSwingSL)
+         sig.swingSL = ComputeSwingSL(sigBullFinal, atrBuf[idx], high, low, idx);
    }
 
    // EXIT score (if position open)
@@ -586,6 +624,96 @@ int CalcExitScoreEA(bool isBullPos, int idx,
 }
 
 //+------------------------------------------------------------------+
+//| Quality entry filter: pullback + momentum + volume                |
+//| Returns true if entry passes ALL quality checks for direction.   |
+//+------------------------------------------------------------------+
+bool PassesQualityFilter(bool isBull, int idx,
+                         const double &open[], const double &high[],
+                         const double &low[],  const double &close[],
+                         const long   &tickVol[],
+                         const double &e3[],   // EMA21
+                         const double &atrBuf[])
+{
+   if(idx < 25) return false;
+   double atr = atrBuf[idx];
+   if(atr <= 0) return false;
+
+   // (1) Pullback: in last N bars, price must have come within 0.5*ATR of EMA21
+   //     (proves we are not chasing an extended move)
+   if(InpRequirePullback)
+   {
+      bool pulled = false;
+      int lookback = MathMin(InpPullbackBars, idx);
+      for(int j = idx - lookback; j <= idx; j++)
+      {
+         double dist;
+         if(isBull) dist = low[j]  - e3[j];   // for buy, low approached EMA21
+         else        dist = e3[j]  - high[j]; // for sell, high approached EMA21
+         if(dist < atr * 0.5) { pulled = true; break; }
+      }
+      if(!pulled) return false;
+   }
+
+   // (2) Not too far from EMA21 at entry (avoid late entries)
+   double curDist = MathAbs(close[idx] - e3[idx]);
+   if(curDist > atr * InpMaxDistFromEMA) return false;
+
+   // (3) Momentum candle: close in top/bottom 30% of bar range, body>50%
+   if(InpRequireMomentumCandle)
+   {
+      double range = high[idx] - low[idx];
+      if(range <= 0) return false;
+      double body  = MathAbs(close[idx] - open[idx]);
+      if(body < range * 0.5) return false;
+      if(isBull)
+      {
+         if(close[idx] < open[idx]) return false;            // must close green
+         if((high[idx] - close[idx]) > range * 0.3) return false; // close near high
+      }
+      else
+      {
+         if(close[idx] > open[idx]) return false;            // must close red
+         if((close[idx] - low[idx]) > range * 0.3) return false;  // close near low
+      }
+   }
+
+   // (4) Volume boost: above 20-bar average
+   if(InpRequireVolumeBoost)
+   {
+      double sum = 0;
+      for(int j = idx - 20; j < idx; j++) sum += (double)tickVol[j];
+      double avg = sum / 20.0;
+      if(avg <= 0) return false;
+      if((double)tickVol[idx] < avg * 1.1) return false;
+   }
+   return true;
+}
+
+//+------------------------------------------------------------------+
+//| Compute swing-low / swing-high based SL price                    |
+//+------------------------------------------------------------------+
+double ComputeSwingSL(bool isBull, double atr,
+                      const double &high[], const double &low[], int idx)
+{
+   if(idx < InpSwingSLBars) return 0;
+   double extreme;
+   if(isBull)
+   {
+      extreme = low[idx];
+      for(int j = idx - InpSwingSLBars + 1; j <= idx; j++)
+         if(low[j] < extreme) extreme = low[j];
+      return extreme - atr * InpSwingSLBufATR;
+   }
+   else
+   {
+      extreme = high[idx];
+      for(int j = idx - InpSwingSLBars + 1; j <= idx; j++)
+         if(high[j] > extreme) extreme = high[j];
+      return extreme + atr * InpSwingSLBufATR;
+   }
+}
+
+//+------------------------------------------------------------------+
 //| Risk / Filter checks                                              |
 //+------------------------------------------------------------------+
 bool IsTimeAllowed()
@@ -594,6 +722,8 @@ bool IsTimeAllowed()
    MqlDateTime dt;
    TimeToStruct(TimeCurrent(), dt);
    if(dt.hour < InpStartHour || dt.hour >= InpEndHour) return false;
+   // Avoid first 5 min of each hour (news spike risk)
+   if(InpAvoidNewsHour && dt.min < 5) return false;
    return true;
 }
 
@@ -663,20 +793,32 @@ double CalcLotSize(double slDistancePoints)
 //+------------------------------------------------------------------+
 //| Trade execution                                                   |
 //+------------------------------------------------------------------+
-bool OpenTrade(bool isBull, double atr)
+bool OpenTrade(bool isBull, double atr, double swingSLPrice)
 {
    double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
    double price = isBull ? SymbolInfoDouble(_Symbol, SYMBOL_ASK)
                           : SymbolInfoDouble(_Symbol, SYMBOL_BID);
 
-   double slDistPts = atr * InpSLAtrMult / point;
+   // Determine SL distance: prefer swing-based, fallback to ATR
+   double slDistPts;
+   if(InpUseSwingSL && swingSLPrice > 0)
+   {
+      slDistPts = isBull ? (price - swingSLPrice) / point
+                          : (swingSLPrice - price) / point;
+   }
+   else
+   {
+      slDistPts = atr * InpSLAtrMult / point;
+   }
+
    if(slDistPts < InpMinSLPoints) slDistPts = InpMinSLPoints;
    if(slDistPts > InpMaxSLPoints) slDistPts = InpMaxSLPoints;
 
-   double tp2DistPts = atr * InpTP2AtrMult / point;
-
    double stopsLevel = (double)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
-   if(slDistPts  < stopsLevel + 5.0) slDistPts  = stopsLevel + 5.0;
+   if(slDistPts < stopsLevel + 5.0) slDistPts = stopsLevel + 5.0;
+
+   // TP2 = R x InpTP2RR (from initial risk distance)
+   double tp2DistPts = slDistPts * InpTP2RR;
    if(tp2DistPts < stopsLevel + 5.0) tp2DistPts = stopsLevel + 5.0;
 
    double sl = isBull ? price - slDistPts * point : price + slDistPts * point;
@@ -684,19 +826,25 @@ bool OpenTrade(bool isBull, double atr)
    double lots = CalcLotSize(slDistPts);
 
    bool ok;
-   if(isBull) ok = g_trade.Buy(lots, _Symbol, price, sl, tp, "FadApex EA");
-   else        ok = g_trade.Sell(lots, _Symbol, price, sl, tp, "FadApex EA");
+   if(isBull) ok = g_trade.Buy(lots, _Symbol, price, sl, tp, "FadApex EA v1.10");
+   else        ok = g_trade.Sell(lots, _Symbol, price, sl, tp, "FadApex EA v1.10");
 
    if(ok)
    {
-      g_currentTicket = g_trade.ResultDeal();
-      g_currentBull   = isBull;
-      g_entryPrice    = price;
-      g_initialSL     = sl;
-      g_atrAtEntry    = atr;
-      g_tp1Hit        = false;
-      Print("OPEN ", isBull ? "BUY" : "SELL", " @ ", price,
-            " SL=", sl, " TP=", tp, " Lots=", lots);
+      g_currentTicket  = g_trade.ResultDeal();
+      g_currentBull    = isBull;
+      g_entryPrice     = price;
+      g_initialSL      = sl;
+      g_atrAtEntry     = atr;
+      g_initialRiskPts = slDistPts;
+      g_entryBarTime   = iTime(_Symbol, PERIOD_CURRENT, 0);
+      g_tp1Hit         = false;
+      g_tightTrailOn   = false;
+      Print("OPEN ", isBull ? "BUY" : "SELL", " @ ", DoubleToString(price, _Digits),
+            " SL=", DoubleToString(sl, _Digits),
+            " TP=", DoubleToString(tp, _Digits),
+            " Lots=", DoubleToString(lots, 2),
+            " R=", DoubleToString(slDistPts, 0), "pts");
       return true;
    }
    Print("Trade open failed: ", g_trade.ResultRetcode(),
@@ -721,7 +869,7 @@ void CloseAllPositions(string reason)
 }
 
 //+------------------------------------------------------------------+
-//| Manage open position: TP1 partial, trailing                       |
+//| Manage open position: TP1 partial + multi-stage R-based trailing  |
 //+------------------------------------------------------------------+
 void ManageOpenPosition()
 {
@@ -730,8 +878,10 @@ void ManageOpenPosition()
    {
       // Position no longer exists — was closed (SL/TP/manual)
       OnPositionClosed();
-      g_currentTicket = 0;
-      g_tp1Hit = false;
+      g_currentTicket  = 0;
+      g_tp1Hit         = false;
+      g_tightTrailOn   = false;
+      g_initialRiskPts = 0;
       return;
    }
 
@@ -741,13 +891,32 @@ void ManageOpenPosition()
    double profitPts = g_currentBull ? (curPrice - g_entryPrice) / point
                                      : (g_entryPrice - curPrice) / point;
 
-   // Safety: skip management if no valid ATR reference (e.g., reattach failure)
-   if(g_atrAtEntry <= 0) return;
+   // Safety: skip management without a valid risk reference
+   if(g_initialRiskPts <= 0) return;
 
-   double tp1Pts = g_atrAtEntry * InpTP1AtrMult / point;
+   double R = g_initialRiskPts;            // 1R in points
+   double rrNow = profitPts / R;           // current profit in R-multiples
+   double curSL = g_pos.StopLoss();
+   double curTP = g_pos.TakeProfit();
 
-   // TP1 partial close + move SL to BE
-   if(!g_tp1Hit && profitPts >= tp1Pts)
+   // --- Max bars in trade timeout ---
+   if(InpMaxBarsInTrade > 0 && g_entryBarTime > 0)
+   {
+      int barSec = PeriodSeconds(PERIOD_CURRENT);
+      if(barSec > 0)
+      {
+         long elapsed = (long)(TimeCurrent() - g_entryBarTime) / barSec;
+         if(elapsed >= InpMaxBarsInTrade)
+         {
+            Print("Max bars in trade reached (", elapsed, "). Closing.");
+            g_trade.PositionClose(g_currentTicket);
+            return;
+         }
+      }
+   }
+
+   // --- TP1 partial + move SL to BE ---
+   if(!g_tp1Hit && rrNow >= InpTP1RR)
    {
       double curVol = g_pos.Volume();
       double step   = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
@@ -756,33 +925,35 @@ void ManageOpenPosition()
       if(partial >= minVol && partial < curVol)
       {
          if(g_trade.PositionClosePartial(g_currentTicket, partial))
-         {
-            Print("TP1 partial close: ", partial, " lots @ ", curPrice);
-         }
+            Print("TP1 partial @", rrNow, "R: ", DoubleToString(partial, 2),
+                  " lots @ ", DoubleToString(curPrice, _Digits));
       }
-      // Move SL to BE
-      double newSL = g_entryPrice;
-      double curSL = g_pos.StopLoss();
-      double curTP = g_pos.TakeProfit();
+      // Move SL to BE + small buffer
+      double bufPts = 5.0;
+      double newSL = g_currentBull ? g_entryPrice + bufPts * point
+                                    : g_entryPrice - bufPts * point;
       if((g_currentBull && newSL > curSL) || (!g_currentBull && newSL < curSL))
-      {
          g_trade.PositionModify(g_currentTicket, newSL, curTP);
-      }
       g_tp1Hit = true;
+      return;  // Defer further trail to next tick after stable state
    }
 
-   // Trailing stop after TP1
-   if(g_tp1Hit && InpUseTrailing)
-   {
-      double trailDist = g_atrAtEntry * InpTrailAtrMult;
-      double newSL = g_currentBull ? curPrice - trailDist : curPrice + trailDist;
-      double curSL = g_pos.StopLoss();
-      double curTP = g_pos.TakeProfit();
-      if(g_currentBull && newSL > curSL)
-         g_trade.PositionModify(g_currentTicket, newSL, curTP);
-      else if(!g_currentBull && newSL < curSL)
-         g_trade.PositionModify(g_currentTicket, newSL, curTP);
-   }
+   // --- Multi-stage trailing after TP1 ---
+   if(!g_tp1Hit || !InpUseTrailing) return;
+
+   // Engage tighter trail once we're at significant profit
+   if(!g_tightTrailOn && rrNow >= InpTightTrailRR) g_tightTrailOn = true;
+
+   double trailDistPts = g_tightTrailOn ? R * InpTightTrailDist
+                                          : R * InpTrailDistRR;
+   if(rrNow < InpTrailStartRR) return;  // Don't trail until trail-start RR reached
+
+   double newSL = g_currentBull ? curPrice - trailDistPts * point
+                                 : curPrice + trailDistPts * point;
+   if(g_currentBull && newSL > curSL)
+      g_trade.PositionModify(g_currentTicket, newSL, curTP);
+   else if(!g_currentBull && newSL < curSL)
+      g_trade.PositionModify(g_currentTicket, newSL, curTP);
 }
 
 //+------------------------------------------------------------------+
@@ -885,13 +1056,20 @@ void OnTick()
    if(sig.rank == "B" && InpEntryRankB) rankOK = true;
    if(!rankOK) return;
 
+   // Quality filter (pullback + momentum + volume) - the heart of v1.10
+   if(!sig.qualityPass) return;
+
    // ATR check
-   double atrArr[];
-   if(CopyBuffer(g_hATR, 0, 1, 1, atrArr) != 1) return;
-   double atr = atrArr[0];
    double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   double atr = sig.atrAtSig;
+   if(atr <= 0)
+   {
+      double atrArr[];
+      if(CopyBuffer(g_hATR, 0, 1, 1, atrArr) != 1) return;
+      atr = atrArr[0];
+   }
    if(atr / point < InpMinATRPoints) return;
 
    bool isBull = (sig.direction == 1);
-   OpenTrade(isBull, atr);
+   OpenTrade(isBull, atr, sig.swingSL);
 }
