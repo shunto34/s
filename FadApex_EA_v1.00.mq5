@@ -675,9 +675,9 @@ bool OpenTrade(bool isBull, double atr)
 
    double tp2DistPts = atr * InpTP2AtrMult / point;
 
-   long stopsLevel = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
-   if(slDistPts < stopsLevel + 5)  slDistPts  = stopsLevel + 5;
-   if(tp2DistPts < stopsLevel + 5) tp2DistPts = stopsLevel + 5;
+   double stopsLevel = (double)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
+   if(slDistPts  < stopsLevel + 5.0) slDistPts  = stopsLevel + 5.0;
+   if(tp2DistPts < stopsLevel + 5.0) tp2DistPts = stopsLevel + 5.0;
 
    double sl = isBull ? price - slDistPts * point : price + slDistPts * point;
    double tp = isBull ? price + tp2DistPts * point : price - tp2DistPts * point;
