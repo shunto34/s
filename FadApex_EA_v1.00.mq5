@@ -87,7 +87,6 @@ datetime g_dailyDate         = 0;
 double   g_dailyStartBalance = 0;
 int      g_consecLosses      = 0;
 datetime g_cooldownEnd       = 0;
-double   g_lastPositionProfit = 0;
 ulong    g_lastClosedTicket  = 0;
 
 // Trade state
@@ -188,7 +187,16 @@ void ScanExistingPosition()
          g_currentBull   = (g_pos.PositionType() == POSITION_TYPE_BUY);
          g_entryPrice    = g_pos.PriceOpen();
          g_initialSL     = g_pos.StopLoss();
-         g_tp1Hit        = false;
+         // EA restart: skip TP1 partial (assume already done or skip safely)
+         g_tp1Hit        = true;
+         // Use current ATR as fallback for trailing distance
+         double atrArr[];
+         if(CopyBuffer(g_hATR, 0, 1, 1, atrArr) == 1)
+            g_atrAtEntry = atrArr[0];
+         else
+            g_atrAtEntry = 0;
+         Print("Reattached existing position ticket=", g_currentTicket,
+               " bull=", g_currentBull, " ATR=", g_atrAtEntry);
          return;
       }
    }
@@ -220,11 +228,15 @@ int FindHTFIdxByCutoff(const datetime &t[], int total, datetime cutoff)
 }
 
 //+------------------------------------------------------------------+
-//| Compute HTF barTrend at LATEST chart bar (simulates ProcessHTF)  |
+//| Compute HTF trend ARRAY (per chart bar) — needed for replay      |
 //+------------------------------------------------------------------+
-int ComputeHTFTrend(int tfIdx, int chartTotal,
-                    const datetime &chartTime[])
+bool ComputeHTFTrendArray(int tfIdx, int chartTotal,
+                          const datetime &chartTime[],
+                          double &outTrend[])
 {
+   ArrayResize(outTrend, chartTotal);
+   ArrayInitialize(outTrend, 0.0);
+
    ENUM_TIMEFRAMES period = g_mtfTF[tfIdx];
    int need = 1500;
 
@@ -239,7 +251,7 @@ int ComputeHTFTrend(int tfIdx, int chartTotal,
    int cntT = CopyTime(_Symbol, period, 0, need, htfT);
    int cnt  = MathMin(MathMin(cntH, cntL), MathMin(cntC, cntT));
    int lb   = InpSwingLB;
-   if(cnt < 2 * lb + 2) return 0;
+   if(cnt < 2 * lb + 2) return false;
 
    double htfPH[], htfPL[];
    ArrayResize(htfPH, cnt); ArrayResize(htfPL, cnt);
@@ -260,9 +272,7 @@ int ComputeHTFTrend(int tfIdx, int chartTotal,
    int chartPeriod = PeriodSeconds(PERIOD_CURRENT);
    int htfPeriod   = PeriodSeconds(period);
 
-   // Replay from beginning of chart bars to compute trend at latest
-   int startI = MathMax(0, chartTotal - 600);
-   for(int i = startI; i < chartTotal; i++)
+   for(int i = 0; i < chartTotal; i++)
    {
       datetime chartClose = chartTime[i] + (datetime)chartPeriod;
       datetime cutoff = chartClose - (datetime)htfPeriod;
@@ -315,16 +325,18 @@ int ComputeHTFTrend(int tfIdx, int chartTotal,
       if(mBu) trend = 1;
       if(mBe) trend = -1;
 
+      outTrend[i] = (double)trend;
+
       prevMappedClose = curClose;
       prevLastSH = lastSH;
       prevLastSL = lastSL;
       prevMappedIdx = htfIdx;
    }
-   return trend;
+   return true;
 }
 
 //+------------------------------------------------------------------+
-//| Compute signal at the latest CLOSED bar                          |
+//| Compute signal at the latest CLOSED bar — full replay version     |
 //+------------------------------------------------------------------+
 SignalResult ComputeSignal()
 {
@@ -349,122 +361,138 @@ SignalResult ComputeSignal()
    if(CopyClose(_Symbol,PERIOD_CURRENT,0,need,close) != need) return sig;
    if(CopyTickVolume(_Symbol,PERIOD_CURRENT,0,need,tick_vol) != need) return sig;
 
-   double e[8][];
-   for(int k = 0; k < 8; k++)
-   {
-      ArraySetAsSeries(e[k],false);
-      ArrayResize(e[k], need);
-      if(CopyBuffer(g_hEMA[k],0,0,need,e[k]) != need) return sig;
-   }
+   double e0[], e1[], e2[], e3[], e4[], e5[], e6[], e7[];
+   ArraySetAsSeries(e0,false); ArraySetAsSeries(e1,false);
+   ArraySetAsSeries(e2,false); ArraySetAsSeries(e3,false);
+   ArraySetAsSeries(e4,false); ArraySetAsSeries(e5,false);
+   ArraySetAsSeries(e6,false); ArraySetAsSeries(e7,false);
+   if(CopyBuffer(g_hEMA[0],0,0,need,e0) != need) return sig;
+   if(CopyBuffer(g_hEMA[1],0,0,need,e1) != need) return sig;
+   if(CopyBuffer(g_hEMA[2],0,0,need,e2) != need) return sig;
+   if(CopyBuffer(g_hEMA[3],0,0,need,e3) != need) return sig;
+   if(CopyBuffer(g_hEMA[4],0,0,need,e4) != need) return sig;
+   if(CopyBuffer(g_hEMA[5],0,0,need,e5) != need) return sig;
+   if(CopyBuffer(g_hEMA[6],0,0,need,e6) != need) return sig;
+   if(CopyBuffer(g_hEMA[7],0,0,need,e7) != need) return sig;
+
    double atrBuf[], adxBuf[];
    ArraySetAsSeries(atrBuf,false); ArraySetAsSeries(adxBuf,false);
    if(CopyBuffer(g_hATR,0,0,need,atrBuf) != need) return sig;
    if(CopyBuffer(g_hADX,0,0,need,adxBuf) != need) return sig;
 
-   // Latest CLOSED bar
-   int idx = need - 2;
+   // Compute HTF trend arrays for all bars (one-time per signal call)
+   double trend0[], trend1[], trend2[];
+   if(!ComputeHTFTrendArray(0, need, time, trend0)) return sig;
+   if(!ComputeHTFTrendArray(1, need, time, trend1)) return sig;
+   if(!ComputeHTFTrendArray(2, need, time, trend2)) return sig;
 
-   // HTF trends at this chart bar (use full ProcessHTF on shifted view)
-   int t0 = ComputeHTFTrendAt(0, time, idx, need);
-   int t1 = ComputeHTFTrendAt(1, time, idx, need);
-   int t2 = ComputeHTFTrendAt(2, time, idx, need);
+   int idx = need - 2;  // Latest CLOSED bar
 
-   // Replay master state up to idx
-   int prevMaster = 0;
+   // Replay prevMaster from a stable starting point
+   int prevMaster    = 0;
    int lastSignalBar = -9999;
-   int latestSigBar  = -1;
-   bool latestBull   = false;
-   int  latestScore  = 0;
+   int sigBarFinal   = -1;
+   bool sigBullFinal = false;
+   int  sigScoreFinal = 0;
+   int startReplay = MathMax(InpEMA8 + 10, idx - 400);
 
-   for(int i = 200; i <= idx; i++)
+   for(int i = startReplay; i <= idx; i++)
    {
-      // Recompute trends at each bar — too slow; instead replay simplified
-      // Use direct indicator value for last 100 bars
+      int t0 = (int)trend0[i];
+      int t1 = (int)trend1[i];
+      int t2 = (int)trend2[i];
+
+      int buCnt = 0, beCnt = 0;
+      if(t0 == 1)  buCnt++; if(t0 == -1) beCnt++;
+      if(t1 == 1)  buCnt++; if(t1 == -1) beCnt++;
+      if(t2 == 1)  buCnt++; if(t2 == -1) beCnt++;
+
+      bool rBull = (e0[i] > e7[i]);
+      bool aBull = (buCnt >= InpTrendConfirm) && rBull;
+      bool aBear = (beCnt >= InpTrendConfirm) && !rBull;
+
+      int nT;
+      if(aBull) nT = 1;
+      else if(aBear) nT = -1;
+      else nT = prevMaster;
+
+      // Range filter
+      bool passRange = true;
+      if(adxBuf[i] < InpMinADX) passRange = false;
+      if(atrBuf[i] > 0)
+      {
+         double rW = MathAbs(e0[i] - e7[i]);
+         if(rW < atrBuf[i] * InpRibbonATRRatio) passRange = false;
+      }
+      if((i - lastSignalBar) < InpCooldownBars) passRange = false;
+
+      bool isTransition = (nT == 1 && prevMaster != 1) || (nT == -1 && prevMaster != -1);
+
+      if(passRange && isTransition)
+      {
+         bool isBull = (nT == 1);
+         int score = 0;
+
+         // Factor 1: All 3 TFs aligned
+         if(isBull && buCnt == 3)  score++;
+         if(!isBull && beCnt == 3) score++;
+
+         // Factor 2: Perfect EMA order
+         bool perfOrder;
+         if(isBull)
+            perfOrder = e0[i]>e1[i] && e1[i]>e2[i] && e2[i]>e3[i]
+                     && e3[i]>e4[i] && e4[i]>e5[i] && e5[i]>e6[i]
+                     && e6[i]>e7[i];
+         else
+            perfOrder = e0[i]<e1[i] && e1[i]<e2[i] && e2[i]<e3[i]
+                     && e3[i]<e4[i] && e4[i]<e5[i] && e5[i]<e6[i]
+                     && e6[i]<e7[i];
+         if(perfOrder) score++;
+
+         // Factor 3: Candle momentum
+         double bodySize = MathAbs(close[i] - open[i]);
+         double avgBody = 0;
+         int mLook = MathMin(20, i - startReplay);
+         if(mLook > 0)
+         {
+            for(int j = i - mLook; j < i; j++) avgBody += MathAbs(close[j] - open[j]);
+            avgBody /= mLook;
+         }
+         if(avgBody > 0 && bodySize > avgBody * 1.3) score++;
+
+         // Factor 4: Ribbon squeeze expansion
+         double curWidth = MathAbs(e0[i] - e7[i]);
+         double minW = curWidth;
+         int sqLook = MathMin(10, i - startReplay);
+         for(int j = i - sqLook; j < i; j++)
+            minW = MathMin(minW, MathAbs(e0[j] - e7[j]));
+         if(curWidth > 0 && minW < curWidth * 0.5) score++;
+
+         lastSignalBar = i;
+         // Track only the LATEST signal bar
+         sigBarFinal   = i;
+         sigBullFinal  = isBull;
+         sigScoreFinal = score;
+      }
+
+      // Update prevMaster (matches indicator logic)
+      if(!isTransition || passRange)
+         prevMaster = nT;
    }
 
-   // Simplified single-bar evaluation at idx
-   int buCnt=0, beCnt=0;
-   if(t0==1) buCnt++; if(t0==-1) beCnt++;
-   if(t1==1) buCnt++; if(t1==-1) beCnt++;
-   if(t2==1) buCnt++; if(t2==-1) beCnt++;
-
-   bool rBull = (e[0][idx] > e[7][idx]);
-   bool aBull = (buCnt >= InpTrendConfirm) && rBull;
-   bool aBear = (beCnt >= InpTrendConfirm) && !rBull;
-
-   // For prev bar
-   bool rBullPrev = (e[0][idx-1] > e[7][idx-1]);
-
-   // Range filter
-   bool passRange = true;
-   if(adxBuf[idx] < InpMinADX) passRange = false;
-   if(atrBuf[idx] > 0)
+   // Only fire if signal occurred on the latest bar (idx)
+   if(sigBarFinal == idx)
    {
-      double rW = MathAbs(e[0][idx] - e[7][idx]);
-      if(rW < atrBuf[idx] * InpRibbonATRRatio) passRange = false;
-   }
-
-   // Determine if latest bar is a transition
-   // We need prev master = trend before this bar; approximate by prev bar's aBull/aBear
-   int buCntPrev=0, beCntPrev=0;
-   // Approximate: ribbon at prev bar
-   // For simplicity, use HTF trend from previous bar (same period since HTF rarely flips)
-   // Use whether prev bar was clearly bull/bear
-   bool prevBull = rBullPrev;
-   int approxPrev = (prevBull && rBullPrev) ? 1 : (!prevBull && !rBullPrev) ? -1 : 0;
-
-   // Better: use sign of EMA0-EMA7 trend persistence over last 5 bars
-   int emaSignBar = idx - 1;
-   double diff = e[0][emaSignBar] - e[7][emaSignBar];
-   approxPrev = (diff > 0) ? 1 : (diff < 0) ? -1 : 0;
-
-   bool isBullTransition = aBull && approxPrev != 1;
-   bool isBearTransition = aBear && approxPrev != -1;
-
-   if(passRange && (isBullTransition || isBearTransition))
-   {
-      bool isBull = isBullTransition;
-      int score = 0;
-
-      // Factor 1: All 3 TFs aligned
-      if(isBull && buCnt == 3) score++;
-      if(!isBull && beCnt == 3) score++;
-
-      // Factor 2: Perfect EMA order
-      bool perfOrder;
-      if(isBull)
-         perfOrder = e[0][idx]>e[1][idx] && e[1][idx]>e[2][idx] && e[2][idx]>e[3][idx]
-                  && e[3][idx]>e[4][idx] && e[4][idx]>e[5][idx] && e[5][idx]>e[6][idx]
-                  && e[6][idx]>e[7][idx];
-      else
-         perfOrder = e[0][idx]<e[1][idx] && e[1][idx]<e[2][idx] && e[2][idx]<e[3][idx]
-                  && e[3][idx]<e[4][idx] && e[4][idx]<e[5][idx] && e[5][idx]<e[6][idx]
-                  && e[6][idx]<e[7][idx];
-      if(perfOrder) score++;
-
-      // Factor 3: Candle momentum
-      double bodySize = MathAbs(close[idx] - open[idx]);
-      double avgBody = 0;
-      for(int j = idx - 20; j < idx; j++) avgBody += MathAbs(close[j] - open[j]);
-      avgBody /= 20.0;
-      if(avgBody > 0 && bodySize > avgBody * 1.3) score++;
-
-      // Factor 4: Ribbon squeeze expansion
-      double curWidth = MathAbs(e[0][idx] - e[7][idx]);
-      double minW = curWidth;
-      for(int j = idx - 10; j < idx; j++)
-         minW = MathMin(minW, MathAbs(e[0][j] - e[7][j]));
-      if(curWidth > 0 && minW < curWidth * 0.5) score++;
-
-      sig.direction = isBull ? 1 : -1;
-      sig.score = score;
-      sig.rank = (score >= 3) ? "S" : (score == 2) ? "A" : "B";
+      sig.direction = sigBullFinal ? 1 : -1;
+      sig.score     = sigScoreFinal;
+      sig.rank      = (sigScoreFinal >= 3) ? "S" : (sigScoreFinal == 2) ? "A" : "B";
    }
 
    // EXIT score (if position open)
    if(g_currentTicket != 0)
    {
-      sig.exitScore = CalcExitScoreEA(g_currentBull, idx, e, close, open, high, low,
+      sig.exitScore = CalcExitScoreEA(g_currentBull, idx,
+                                       e0, e7, close, open, high, low,
                                        tick_vol, atrBuf, adxBuf);
       sig.hasExit = (sig.exitScore >= InpExitThreshold);
    }
@@ -472,21 +500,10 @@ SignalResult ComputeSignal()
 }
 
 //+------------------------------------------------------------------+
-//| HTF trend at specific chart bar idx                              |
-//+------------------------------------------------------------------+
-int ComputeHTFTrendAt(int tfIdx, const datetime &chartTime[],
-                      int idx, int chartTotal)
-{
-   datetime chartTimeSlice[];
-   ArrayResize(chartTimeSlice, idx + 1);
-   for(int i = 0; i <= idx; i++) chartTimeSlice[i] = chartTime[i];
-   return ComputeHTFTrend(tfIdx, idx + 1, chartTimeSlice);
-}
-
-//+------------------------------------------------------------------+
 //| EXIT score (port of v4.62 CalcExitScore)                         |
 //+------------------------------------------------------------------+
-int CalcExitScoreEA(bool isBullPos, int idx, const double &e[][],
+int CalcExitScoreEA(bool isBullPos, int idx,
+                    const double &e0[], const double &e7[],
                     const double &close[], const double &open[],
                     const double &high[], const double &low[],
                     const long &tickVol[], const double &atrBuf[],
@@ -496,10 +513,10 @@ int CalcExitScoreEA(bool isBullPos, int idx, const double &e[][],
    if(idx < 22) return 0;
 
    // Layer 1: Price deviation from EMA (30pt)
-   double ribbonW = MathAbs(e[0][idx] - e[7][idx]);
+   double ribbonW = MathAbs(e0[idx] - e7[idx]);
    if(atrBuf[idx] > 0 && ribbonW > 0)
    {
-      double dev = isBullPos ? (close[idx] - e[0][idx]) : (e[0][idx] - close[idx]);
+      double dev = isBullPos ? (close[idx] - e0[idx]) : (e0[idx] - close[idx]);
       double atrDev = dev / atrBuf[idx];
       if(atrDev > 1.5)      score += 30.0;
       else if(atrDev > 1.0)  score += 22.0;
@@ -508,8 +525,8 @@ int CalcExitScoreEA(bool isBullPos, int idx, const double &e[][],
    }
 
    // Layer 2: EMA slope reversal (25pt)
-   double slopeNow  = e[0][idx] - e[0][idx - 2];
-   double slopePrev = e[0][idx - 2] - e[0][idx - 4];
+   double slopeNow  = e0[idx] - e0[idx - 2];
+   double slopePrev = e0[idx - 2] - e0[idx - 4];
    if(isBullPos)
    {
       if(slopeNow <= 0)                                    score += 25.0;
@@ -723,6 +740,9 @@ void ManageOpenPosition()
                                     : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    double profitPts = g_currentBull ? (curPrice - g_entryPrice) / point
                                      : (g_entryPrice - curPrice) / point;
+
+   // Safety: skip management if no valid ATR reference (e.g., reattach failure)
+   if(g_atrAtEntry <= 0) return;
 
    double tp1Pts = g_atrAtEntry * InpTP1AtrMult / point;
 
