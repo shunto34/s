@@ -1193,8 +1193,8 @@ void CreateBOSLabel(string tag, datetime dt, double pr,
    ObjectCreate(0, nm, OBJ_TEXT, 0, dt, pr);
    ObjectSetString(0, nm, OBJPROP_TEXT, txt);
    ObjectSetInteger(0, nm, OBJPROP_COLOR, c);
-   ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, 13);
-   ObjectSetString(0, nm, OBJPROP_FONT, "Arial Bold");
+   ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, 16);
+   ObjectSetString(0, nm, OBJPROP_FONT, "Arial Black");
    ObjectSetInteger(0, nm, OBJPROP_ANCHOR,
                     above ? ANCHOR_LOWER : ANCHOR_UPPER);
 }
