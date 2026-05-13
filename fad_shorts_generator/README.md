@@ -17,9 +17,21 @@
 git clone <this-repo>
 cd fad_shorts_generator
 ./setup.sh                                  # FFmpeg / VOICEVOX / venv / フォント / 動作テスト
-source .venv/bin/activate
+```
 
-# 1本生成
+### 🖥️ A. ブラウザから操作する（推奨）
+
+```bash
+./serve.sh                                  # → http://127.0.0.1:8765 が開く
+```
+
+ブラウザでフォームに値を入れて **「▶ 動画を生成」** を押すだけ。進捗バーが
+動いて、終わると右側に動画プレビューが出ます。`output/` の過去動画も一覧表示。
+
+### 🛠 B. コマンドラインで操作する
+
+```bash
+source .venv/bin/activate
 python generate.py \
   --chart input/today.png \
   --profit 38974 --score 55 --bias BEAR --pattern pattern_a
@@ -258,6 +270,11 @@ fad_shorts_generator/
 ├── video_composer.py     # MoviePy 2.x コンポジター
 ├── ng_word_check.py
 ├── setup.sh
+├── serve.sh              # Web UI 起動 (http://127.0.0.1:8765)
+├── web/
+│   ├── app.py            # Flask サーバ
+│   ├── templates/index.html
+│   └── static/{style.css, app.js}
 ├── scripts/
 │   ├── download_font.py
 │   └── make_dummy_chart.py

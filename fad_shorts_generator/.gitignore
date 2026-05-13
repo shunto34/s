@@ -3,6 +3,8 @@ __pycache__/
 .venv/
 .cache/
 output/*.mp4
+# MoviePy が書き出し中に作る一時 mp4
+*TEMP_MPY*
 input/*.png
 input/*.jpg
 
