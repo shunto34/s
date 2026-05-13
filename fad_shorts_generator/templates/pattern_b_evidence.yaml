@@ -1,0 +1,25 @@
+# pattern_b: 証拠提示型
+# 「数値で語る」型。NGワードは含めない。
+name: pattern_b_evidence
+title: "今日のシグナル、数字で語る"
+hook_text: "数字で見ると、これ"
+description: "数値・スコアを中心に淡々と語る型"
+
+narrations:
+  hook: "数字で見ると、これです"
+  exit: "ここでEXIT、インジが示した"
+  panels: "スコアでバイアス確認、3時間足の向きも一致"
+  drop: "30分後、想定どおり動いた"
+  profit: "今日の記録、淡々と"
+  cta: "Discordでも毎日記録を残しています"
+
+telops:
+  hook: "数字で見ると、これ"
+  exit: "EXITサイン点灯"
+  panel_1: "スコア確認"
+  panel_2: "3時間足、向き一致"
+  panel_3: "条件クリア"
+  drop: "↓ 30分後 ↓"
+  profit_prefix: "本日の記録 +"
+  cta_main: "Discordで毎日記録中"
+  cta_sub: "↑ プロフィール ↑"

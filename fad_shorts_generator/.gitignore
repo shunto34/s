@@ -1,0 +1,27 @@
+__pycache__/
+*.pyc
+.venv/
+.cache/
+output/*.mp4
+input/*.png
+input/*.jpg
+
+# assets users provide locally
+assets/sfx/*.wav
+assets/sfx/*.mp3
+assets/bgm/*.wav
+assets/bgm/*.mp3
+assets/bgm/*.m4a
+
+# DL される大容量フォント（再生成可）
+assets/fonts/*.otf
+assets/fonts/*.ttf
+assets/fonts/*.ttc
+
+# ダミーチャートは再生成スクリプトがあるためリポジトリ管理しない
+assets/sample/dummy_chart.png
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/

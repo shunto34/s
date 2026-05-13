@@ -1,0 +1,25 @@
+# pattern_c: 結果報告型
+# 「やってみた」「取れた」の事後報告。NGワードは含めない。
+name: pattern_c_result
+title: "今日の結果、こんな感じ"
+hook_text: "今日もインジ通り、これ"
+description: "結果ベースで控えめに語る型"
+
+narrations:
+  hook: "今日もインジ通り、こんな結果でした"
+  exit: "ここでEXITって書いてあった"
+  panels: "スコアと足向き、両方そろってた"
+  drop: "30分後、こうなった"
+  profit: "今日もこれくらい、コツコツ続けます"
+  cta: "詳しい記録はDiscord、見たい人だけどうぞ"
+
+telops:
+  hook: "今日もインジ通り、これ"
+  exit: "EXITサイン通り"
+  panel_1: "スコア合致"
+  panel_2: "3時間足も一致"
+  panel_3: "迷わず実行"
+  drop: "↓ 30分後 ↓"
+  profit_prefix: "本日 +"
+  cta_main: "Discordに記録残してます"
+  cta_sub: "↑ プロフィール ↑"

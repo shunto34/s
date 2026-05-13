@@ -1,0 +1,81 @@
+# fad_shorts_generator — 共通設定
+# このファイルはチャート上の座標やデフォルト値を管理する。
+# FAD APEX のチャート画像は 1920x1080 想定。
+
+video:
+  width: 1080
+  height: 1920
+  fps: 30
+  duration_seconds: 30
+  codec: libx264
+  audio_codec: aac
+  audio_bitrate: "192k"
+  preset: medium
+  crf: 23
+
+# 入力チャート画像（1920x1080）を9:16向けに整形するときの設定。
+# crop_mode:
+#   stretch         : 中央720幅をクロップ→1080x1920に引き伸ばし（仕様書記述）
+#   letterbox       : アスペクト維持のまま1080幅にフィット、上下に黒帯
+crop:
+  mode: letterbox          # stretch | letterbox
+  center_crop_width: 720   # stretch時のみ使用
+
+# チャート画像上のFAD APEX要素の座標（1920x1080想定）
+# 実物の座標に合わせて user 側で調整する想定。
+markers:
+  exit_markers:
+    - { x: 568, y: 290, label: "EXIT1" }
+    - { x: 1207, y: 379, label: "EXIT2" }
+  confidence_panel: { x: 309, y: 685, width: 200, height: 200 }
+  trend_panel:      { x: 1685, y: 750, width: 240, height: 200 }
+  profit_panel:     { x: 760, y: 480, width: 400, height: 120 }
+
+# 音量バランス（0.0-1.0）
+audio:
+  narration: 1.0
+  bgm: 0.30
+  sfx: 0.60
+
+# 効果音ファイル名（assets/sfx/ 配下）
+sfx:
+  flash:  "flash.wav"
+  swipe:  "swipe.wav"
+  click:  "click.wav"
+  sparkle: "sparkle.wav"
+
+# VOICEVOX
+voicevox:
+  endpoint: "http://localhost:50021"
+  timeout_seconds: 30
+  # speaker id 一覧: https://voicevox.hiroshiba.jp/dormitory/
+  voices:
+    genno:
+      # 玄野武宏 ツンギレ（仕様書記載「つよげ」を ツンギレ で代用。強気・煽り型）
+      speaker_id: 33
+      speed: 1.1
+      pitch: 0.0
+      intonation: 1.0
+    genno_normal:
+      # 玄野武宏 ノーマル
+      speaker_id: 11
+      speed: 1.05
+      pitch: 0.0
+      intonation: 1.0
+    metan:
+      # 四国めたん ノーマル
+      speaker_id: 2
+      speed: 1.05
+      pitch: 0.0
+      intonation: 1.0
+
+# フォント（Mac の絶対パス指定必須／MoviePy 2.x の落とし穴対策）
+# setup.sh が assets/fonts/ にDLするのでデフォルトはローカルパス。
+fonts:
+  bold: "assets/fonts/NotoSansCJKjp-Bold.otf"
+  regular: "assets/fonts/NotoSansCJKjp-Regular.otf"
+  fallback_search:
+    - "/Library/Fonts/NotoSansCJKjp-Bold.otf"
+    - "/System/Library/Fonts/Hiragino Sans GB.ttc"
+    - "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"
+    - "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf"
