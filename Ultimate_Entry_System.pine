@@ -1,0 +1,868 @@
+//@version=6
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+//   ULTIMATE ENTRY SYSTEM [UES] — 高精度エントリー専用インジケーター
+//
+//   コンセプト:
+//     HUD(ACTION/TREND/REGIME/DEX/GEX)が市場環境を判断し、
+//     本インジケーターは「最高勝率のエントリーだけ」を表示する。
+//     シグナルは極力少なく、複数の根拠が重なった時のみ点灯する。
+//
+//   アーキテクチャ(開発工程順):
+//     ① Core Engine            … 共通入力・ATR・ピボット・ヘルパー関数
+//     ② Trend Engine           … EMA20/50/200・SuperTrend
+//     ③ Smart Money Engine     … BOS/CHoCH/MSS・OB/Breaker/Mitigation・FVG/IFVG
+//     ④ Liquidity Engine       … Liquidity Sweep・Equal High/Low・Premium/Discount
+//     ⑤ Volume Engine          … Relative Volume・OBV・CMF・Volume Spike
+//     ⑥ Oscillator Engine      … RSI/RSIダイバージェンス・StochRSI・MFI・ADX(CCI/WT任意)
+//     ⑦ Volume Profile Engine  … POC/VAH/VAL/HVN/LVN(ローリング近似)
+//     ⑧ AI Scoring Engine      … 重み付き合計 0〜100点(重みは設定で変更可)
+//     ⑨ Entry Engine           … Ultimate Long/Short 判定・Entry/SL/TP1〜3 描画
+//     ⑩ Alert System           … alertcondition 6種
+//     ⑪ Optimization           … var状態管理・単一計算・オブジェクト数制限
+//     ⑫ Debug                  … スコア内訳テーブル(デフォルトOFF)
+//
+//   非リペイント設計:
+//     ・シグナル判定は確定足のみ (barstate.isconfirmed)
+//     ・ピボットは swingLen 本経過後に確定した値のみ使用
+//     ・request.security / lookahead は不使用
+//     ・板情報・オプションチェーン・実CVD等の取得不能データは
+//       Pine Scriptで再現可能な代替ロジック(出来高系)で近似
+//
+// ═══════════════════════════════════════════════════════════════════════════════
+
+indicator("Ultimate Entry System [UES]", shorttitle = "UES",
+     overlay = true, max_labels_count = 500, max_lines_count = 500)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ① CORE ENGINE — 入力定義・共通計算・ヘルパー
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── 入力グループ名(定数化して再利用)
+string G_CORE  = "① Core"
+string G_TREND = "② Trend"
+string G_SM    = "③ Smart Money"
+string G_LIQ   = "④ Liquidity"
+string G_VOL   = "⑤ Volume"
+string G_OSC   = "⑥ Oscillator"
+string G_VP    = "⑦ Volume Profile"
+string G_SCORE = "⑧ AI Score(重み)"
+string G_ENTRY = "⑨ Entry / Risk"
+string G_DISP  = "⑨ 表示"
+string G_DBG   = "⑫ Debug"
+
+// ── ① Core
+int   swingLen       = input.int(5,   "スイング検出長(Pivot 左右バー数)", minval = 2, maxval = 20, group = G_CORE, tooltip = "構造(BOS/CHoCH/Sweep)の基準となるピボット。大きいほど上位構造。確定に右側バー数分の遅延があるため非リペイント。")
+int   atrLen         = input.int(14,  "ATR期間", minval = 1, group = G_CORE)
+int   smValidBars    = input.int(12,  "構造イベント有効バー数", minval = 1, group = G_CORE, tooltip = "BOS/CHoCH発生から何バーの間シグナル根拠として有効か。")
+int   reactValidBars = input.int(6,   "ゾーン反応 有効バー数", minval = 1, group = G_CORE, tooltip = "OB/FVG等への反応から何バーの間有効か。")
+int   sweepValidBars = input.int(10,  "Sweep 有効バー数", minval = 1, group = G_CORE)
+int   divValidBars   = input.int(20,  "ダイバージェンス有効バー数", minval = 1, group = G_CORE)
+int   xValidBars     = input.int(5,   "クロス系イベント有効バー数", minval = 1, group = G_CORE)
+
+// ── ② Trend
+int   emaFastLen = input.int(20,  "EMA Fast",  minval = 1, group = G_TREND)
+int   emaMidLen  = input.int(50,  "EMA Mid",   minval = 1, group = G_TREND)
+int   emaSlowLen = input.int(200, "EMA Slow",  minval = 1, group = G_TREND)
+float stFactor   = input.float(3.0, "SuperTrend 係数", minval = 0.5, step = 0.1, group = G_TREND)
+int   stAtrLen   = input.int(10,  "SuperTrend ATR期間", minval = 1, group = G_TREND)
+
+// ── VWAP(Trend補完)
+bool useSessVwap = input.bool(true, "Session VWAP を使用", group = G_TREND, tooltip = "日足以上のチャートでは毎バーリセットされるため、主に日中足向け。")
+bool useWeekVwap = input.bool(true, "Weekly VWAP を使用",  group = G_TREND)
+bool useMonVwap  = input.bool(true, "Monthly VWAP を使用", group = G_TREND)
+
+// ── ③ Smart Money
+int   obLookback = input.int(10,   "Order Block 探索バー数", minval = 1, maxval = 30, group = G_SM, tooltip = "構造ブレイク時に遡って直近の逆方向足(OB)を探す範囲。")
+float fvgMinAtr  = input.float(0.10, "FVG 最小サイズ(ATR倍率)", minval = 0.0, step = 0.05, group = G_SM, tooltip = "ノイズ的な極小FVGを除外。")
+int   fvgMaxKeep = input.int(8,    "FVG 最大保持数(方向毎)", minval = 1, maxval = 20, group = G_SM)
+float mssDispAtr = input.float(1.0, "MSS 変位条件(実体のATR倍率)", minval = 0.1, step = 0.1, group = G_SM, tooltip = "CHoCHがこの実体サイズを伴う場合 Market Structure Shift と判定。")
+
+// ── ④ Liquidity
+float eqTolAtr = input.float(0.10, "Equal High/Low 許容幅(ATR倍率)", minval = 0.01, step = 0.01, group = G_LIQ)
+int   pdLen    = input.int(50, "Premium/Discount レンジ期間", minval = 10, group = G_LIQ, tooltip = "直近レンジの中間値(Equilibrium)を基準に割高/割安を判定。")
+
+// ── ⑤ Volume
+int   rvolLen   = input.int(20,  "Relative Volume 期間", minval = 1, group = G_VOL)
+float rvolTh    = input.float(1.5, "RVOL 閾値", minval = 0.5, step = 0.1, group = G_VOL)
+float spikeMult = input.float(2.5, "Volume Spike 倍率", minval = 1.0, step = 0.1, group = G_VOL)
+int   obvLen    = input.int(20,  "OBV 平滑期間", minval = 1, group = G_VOL)
+int   cmfLen    = input.int(20,  "CMF 期間", minval = 1, group = G_VOL)
+
+// ── ⑥ Oscillator
+int   rsiLen    = input.int(14, "RSI期間", minval = 2, group = G_OSC)
+int   divPivLen = input.int(5,  "ダイバージェンス Pivot長", minval = 2, group = G_OSC)
+int   stochLen  = input.int(14, "StochRSI 期間", minval = 2, group = G_OSC)
+int   stochK    = input.int(3,  "StochRSI %K平滑", minval = 1, group = G_OSC)
+int   stochD    = input.int(3,  "StochRSI %D平滑", minval = 1, group = G_OSC)
+int   mfiLen    = input.int(14, "MFI期間", minval = 2, group = G_OSC)
+int   adxLen    = input.int(14, "ADX期間", minval = 1, group = G_OSC)
+float adxTh     = input.float(20.0, "ADX 閾値", minval = 5, step = 1, group = G_OSC)
+bool  useCci    = input.bool(false, "CCI を使用", group = G_OSC)
+int   cciLen    = input.int(20, "CCI期間", minval = 2, group = G_OSC)
+bool  useWt     = input.bool(false, "WaveTrend を使用", group = G_OSC)
+
+// ── ⑦ Volume Profile
+bool vpEnabled  = input.bool(true, "Volume Profile を使用", group = G_VP)
+int  vpLookback = input.int(150, "VP 集計バー数", minval = 30, maxval = 500, group = G_VP)
+int  vpRows     = input.int(24,  "VP 行数(ビン数)", minval = 8, maxval = 50, group = G_VP)
+float vaPct     = input.float(70.0, "Value Area %", minval = 50, maxval = 95, group = G_VP)
+
+// ── ⑧ AI Score 重み(合計は自動正規化されるため任意の比率でOK)
+float wTrend = input.float(20.0, "重み: Trend",          minval = 0, group = G_SCORE)
+float wVwap  = input.float(15.0, "重み: VWAP",           minval = 0, group = G_SCORE)
+float wSm    = input.float(25.0, "重み: Smart Money",    minval = 0, group = G_SCORE)
+float wVol   = input.float(15.0, "重み: Volume",         minval = 0, group = G_SCORE)
+float wOsc   = input.float(15.0, "重み: Oscillator",     minval = 0, group = G_SCORE)
+float wVp    = input.float(10.0, "重み: Volume Profile", minval = 0, group = G_SCORE)
+float scoreTh = input.float(80.0, "AI Score 発火閾値", minval = 50, maxval = 100, step = 1, group = G_SCORE)
+
+// ── ⑨ Entry / Risk
+int    minConf      = input.int(4, "最低コンフルエンス数", minval = 1, maxval = 9, group = G_ENTRY, tooltip = "BOS/FVG/OB/Sweep/Div/StochRSI/ADX/RVOL/Spike の9条件のうち、必須条件(Score・EMA・VWAP)に加えて何個の一致を要求するか。")
+int    cooldownBars = input.int(10, "シグナル間クールダウン(バー)", minval = 0, group = G_ENTRY)
+string slMode       = input.string("Swing", "SL算出方式", options = ["Swing", "ATR"], group = G_ENTRY)
+float  slAtrMult    = input.float(1.5,  "SL: ATR倍率(ATR方式/フォールバック)", minval = 0.1, step = 0.1, group = G_ENTRY)
+float  slBufAtr     = input.float(0.25, "SL: Swing方式バッファ(ATR倍率)", minval = 0.0, step = 0.05, group = G_ENTRY)
+float  tp1R = input.float(1.0, "TP1 (R倍率)", minval = 0.1, step = 0.1, group = G_ENTRY)
+float  tp2R = input.float(2.0, "TP2 (R倍率)", minval = 0.1, step = 0.1, group = G_ENTRY)
+float  tp3R = input.float(3.0, "TP3 (R倍率)", minval = 0.1, step = 0.1, group = G_ENTRY)
+
+// ── ⑨ 表示(全てON/OFF可能)
+bool showLong    = input.bool(true, "Ultimate Long 表示",  group = G_DISP)
+bool showShort   = input.bool(true, "Ultimate Short 表示", group = G_DISP)
+bool showEntry   = input.bool(true, "Entry Price 表示",    group = G_DISP)
+bool showSL      = input.bool(true, "Stop Loss 表示",      group = G_DISP)
+bool showTP1     = input.bool(true, "Take Profit1 表示",   group = G_DISP)
+bool showTP2     = input.bool(true, "Take Profit2 表示",   group = G_DISP)
+bool showTP3     = input.bool(true, "Take Profit3 表示",   group = G_DISP)
+bool showScoreOn = input.bool(true, "ラベルにスコア表示",  group = G_DISP)
+int  extendBars  = input.int(20, "レベル線の延長バー数", minval = 5, maxval = 100, group = G_DISP)
+color colLong  = input.color(#089981, "Longカラー",  group = G_DISP)
+color colShort = input.color(#f23645, "Shortカラー", group = G_DISP)
+color colEntry = input.color(#2962ff, "Entryカラー", group = G_DISP)
+color colSL    = input.color(#f23645, "SLカラー",    group = G_DISP)
+color colTP    = input.color(#089981, "TPカラー",    group = G_DISP)
+
+// ── ⑫ Debug
+bool showDebug = input.bool(false, "デバッグテーブル表示(スコア内訳)", group = G_DBG)
+
+// ── 共通計算(1回だけ計算し全エンジンで共有 = 再計算ゼロ)
+float atrVal = ta.atr(atrLen)
+
+// ── ヘルパー: barssince結果の「N本以内」判定(na安全)
+f_recent(int bs, int within) =>
+    not na(bs) and bs <= within
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ② TREND ENGINE — EMA20/50/200 + SuperTrend
+// ═══════════════════════════════════════════════════════════════════════════════
+
+float ema20V  = ta.ema(close, emaFastLen)
+float ema50V  = ta.ema(close, emaMidLen)
+float ema200V = ta.ema(close, emaSlowLen)
+[stValue, stDir] = ta.supertrend(stFactor, stAtrLen)   // stDir: -1=上昇 / +1=下降
+
+// EMA完全順張り(Ultimate条件の必須項目)
+bool emaBullL = close > ema20V and ema20V > ema50V and ema50V > ema200V
+bool emaBearS = close < ema20V and ema20V < ema50V and ema50V < ema200V
+bool stUp = stDir < 0
+bool stDn = stDir > 0
+
+// ── VWAP(Session / Weekly / Monthly、アンカーは足の確定情報のみ = 非リペイント)
+float sessVwap = ta.vwap(hlc3, timeframe.change("D"))
+float weekVwap = ta.vwap(hlc3, timeframe.change("W"))
+float monVwap  = ta.vwap(hlc3, timeframe.change("M"))
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ③ SMART MONEY ENGINE — 構造 / BOS / CHoCH / MSS / OB / Breaker / FVG / IFVG
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── ピボット(swingLen本後に確定 = 非リペイント)
+float ph = ta.pivothigh(high, swingLen, swingLen)
+float pl = ta.pivotlow(low, swingLen, swingLen)
+
+var float lastPH  = na    // 直近確定スイングハイ
+var float prevPH  = na
+var float lastPL  = na    // 直近確定スイングロー
+var float prevPL  = na
+var bool  phBroken = false   // 同一レベルの多重ブレイク防止フラグ
+var bool  plBroken = false
+var bool  phSwept  = false   // 同一レベルの多重Sweep防止フラグ
+var bool  plSwept  = false
+
+if not na(ph)
+    prevPH  := lastPH
+    lastPH  := ph
+    phBroken := false
+    phSwept  := false
+if not na(pl)
+    prevPL  := lastPL
+    lastPL  := pl
+    plBroken := false
+    plSwept  := false
+
+// ── 構造ブレイク: BOS(順方向) / CHoCH(転換) / MSS(変位を伴うCHoCH)
+var int structDir = 0          // +1=強気構造 / -1=弱気構造
+bool bosUp   = false
+bool bosDn   = false
+bool chochUp = false
+bool chochDn = false
+
+bool breakUpNow = not phBroken and not na(lastPH) and close > lastPH
+bool breakDnNow = not plBroken and not na(lastPL) and close < lastPL
+
+if breakUpNow
+    if structDir >= 0
+        bosUp := true
+    else
+        chochUp := true
+    structDir := 1
+    phBroken  := true
+if breakDnNow
+    if structDir <= 0
+        bosDn := true
+    else
+        chochDn := true
+    structDir := -1
+    plBroken  := true
+
+float bodySize = math.abs(close - open)
+bool mssUp = chochUp and bodySize > atrVal * mssDispAtr
+bool mssDn = chochDn and bodySize > atrVal * mssDispAtr
+
+// ── Order Block: 構造ブレイクの起点となった直近の逆方向足(実体+ヒゲ全域)
+//    ・タッチ+反発      → OB反応(初回タッチ後は Mitigation Block として継続機能)
+//    ・終値でゾーン割れ  → Breaker Block へ転換(逆方向のゾーンとして再利用)
+var float bullObTop = na
+var float bullObBot = na
+var bool  bullObActive = false
+var bool  bullObMitigated = false   // true = Mitigation Block 状態
+var float bearObTop = na
+var float bearObBot = na
+var bool  bearObActive = false
+var bool  bearObMitigated = false
+var float bullBrkTop = na           // 上抜けされたBear OB → 強気Breaker(サポート)
+var float bullBrkBot = na
+var bool  bullBrkActive = false
+var float bearBrkTop = na           // 下抜けされたBull OB → 弱気Breaker(レジスタンス)
+var float bearBrkBot = na
+var bool  bearBrkActive = false
+
+if (bosUp or chochUp) and bar_index > obLookback
+    for i = 1 to obLookback
+        if close[i] < open[i]
+            bullObTop := high[i]
+            bullObBot := low[i]
+            bullObActive := true
+            bullObMitigated := false
+            break
+if (bosDn or chochDn) and bar_index > obLookback
+    for i = 1 to obLookback
+        if close[i] > open[i]
+            bearObTop := high[i]
+            bearObBot := low[i]
+            bearObActive := true
+            bearObMitigated := false
+            break
+
+// ── OB / Breaker への反応判定(ゾーンにタッチし中間値より優位側で確定)
+bool obReactL  = false
+bool obReactS  = false
+bool brkReactL = false
+bool brkReactS = false
+
+if bullObActive
+    float obMidL = math.avg(bullObTop, bullObBot)
+    if close < bullObBot
+        bearBrkTop := bullObTop
+        bearBrkBot := bullObBot
+        bearBrkActive := true
+        bullObActive  := false
+    else if low <= bullObTop and close > obMidL
+        obReactL := true
+        bullObMitigated := true
+if bearObActive
+    float obMidS = math.avg(bearObTop, bearObBot)
+    if close > bearObTop
+        bullBrkTop := bearObTop
+        bullBrkBot := bearObBot
+        bullBrkActive := true
+        bearObActive  := false
+    else if high >= bearObBot and close < obMidS
+        obReactS := true
+        bearObMitigated := true
+
+if bullBrkActive
+    if close < bullBrkBot
+        bullBrkActive := false
+    else if low <= bullBrkTop and close > math.avg(bullBrkTop, bullBrkBot)
+        brkReactL := true
+if bearBrkActive
+    if close > bearBrkTop
+        bearBrkActive := false
+    else if high >= bearBrkBot and close < math.avg(bearBrkTop, bearBrkBot)
+        brkReactS := true
+
+// ── Fair Value Gap(3本足ギャップ)/ Inverse FVG(埋め後の反転ゾーン)
+var array<float> bullFvgTopA = array.new<float>()
+var array<float> bullFvgBotA = array.new<float>()
+var array<float> bearFvgTopA = array.new<float>()
+var array<float> bearFvgBotA = array.new<float>()
+var float bullIfvgTop = na   // 上抜けで無効化されたBear FVG → サポート帯
+var float bullIfvgBot = na
+var bool  bullIfvgActive = false
+var float bearIfvgTop = na   // 下抜けで無効化されたBull FVG → レジスタンス帯
+var float bearIfvgBot = na
+var bool  bearIfvgActive = false
+
+bool newBullFvg = low > high[2] and (low - high[2]) >= atrVal * fvgMinAtr
+bool newBearFvg = high < low[2] and (low[2] - high) >= atrVal * fvgMinAtr
+
+if newBullFvg
+    array.unshift(bullFvgTopA, low)
+    array.unshift(bullFvgBotA, high[2])
+    if array.size(bullFvgTopA) > fvgMaxKeep
+        array.pop(bullFvgTopA)
+        array.pop(bullFvgBotA)
+if newBearFvg
+    array.unshift(bearFvgTopA, low[2])
+    array.unshift(bearFvgBotA, high)
+    if array.size(bearFvgTopA) > fvgMaxKeep
+        array.pop(bearFvgTopA)
+        array.pop(bearFvgBotA)
+
+bool fvgReactL = false
+bool fvgReactS = false
+
+// Bull FVG: 価格がギャップへ押して中間値より上で確定 = 反応 / 終値で下抜け = 弱気IFVGへ転換
+if array.size(bullFvgTopA) > 0
+    for i = array.size(bullFvgTopA) - 1 to 0
+        float fT = array.get(bullFvgTopA, i)
+        float fB = array.get(bullFvgBotA, i)
+        if close < fB
+            bearIfvgTop := fT
+            bearIfvgBot := fB
+            bearIfvgActive := true
+            array.remove(bullFvgTopA, i)
+            array.remove(bullFvgBotA, i)
+        else if low <= fT and close > math.avg(fT, fB)
+            fvgReactL := true
+// Bear FVG: 価格がギャップへ戻して中間値より下で確定 = 反応 / 終値で上抜け = 強気IFVGへ転換
+if array.size(bearFvgTopA) > 0
+    for i = array.size(bearFvgTopA) - 1 to 0
+        float fT = array.get(bearFvgTopA, i)
+        float fB = array.get(bearFvgBotA, i)
+        if close > fT
+            bullIfvgTop := fT
+            bullIfvgBot := fB
+            bullIfvgActive := true
+            array.remove(bearFvgTopA, i)
+            array.remove(bearFvgBotA, i)
+        else if high >= fB and close < math.avg(fT, fB)
+            fvgReactS := true
+
+// Inverse FVG への反応(FVG反応と同格の根拠として合算)
+if bullIfvgActive
+    if close < bullIfvgBot
+        bullIfvgActive := false
+    else if low <= bullIfvgTop and close > math.avg(bullIfvgTop, bullIfvgBot)
+        fvgReactL := true
+if bearIfvgActive
+    if close > bearIfvgTop
+        bearIfvgActive := false
+    else if high >= bearIfvgBot and close < math.avg(bearIfvgTop, bearIfvgBot)
+        fvgReactS := true
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ④ LIQUIDITY ENGINE — Sweep / Equal High・Low / Premium・Discount
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── Equal High / Equal Low(近接する2つのスイング = 流動性プール)
+float eqTolPx = atrVal * eqTolAtr
+bool eqHigh = not na(lastPH) and not na(prevPH) and math.abs(lastPH - prevPH) <= eqTolPx
+bool eqLow  = not na(lastPL) and not na(prevPL) and math.abs(lastPL - prevPL) <= eqTolPx
+
+// ── Liquidity Sweep: スイングをヒゲで刈って終値で戻す(ストップ狩り→反転の兆候)
+bool sweepLowEvt  = false
+bool sweepHighEvt = false
+var bool sweepLWasEq = false   // 直近のSweepがEqual Low(より厚い流動性)だったか
+var bool sweepHWasEq = false
+
+if not plSwept and not na(lastPL) and low < lastPL and close > lastPL
+    sweepLowEvt := true
+    plSwept := true
+    sweepLWasEq := eqLow
+if not phSwept and not na(lastPH) and high > lastPH and close < lastPH
+    sweepHighEvt := true
+    phSwept := true
+    sweepHWasEq := eqHigh
+
+// ── Premium / Discount(直近レンジのEquilibrium基準)
+float pdHi = ta.highest(high, pdLen)
+float pdLo = ta.lowest(low, pdLen)
+float pdEq = math.avg(pdHi, pdLo)
+bool discountZone = close < pdEq   // 割安圏 → ロング優位
+bool premiumZone  = close > pdEq   // 割高圏 → ショート優位
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⑤ VOLUME ENGINE — RVOL / OBV / CMF / Volume Spike
+// ═══════════════════════════════════════════════════════════════════════════════
+
+float volSma = ta.sma(volume, rvolLen)
+float rvol   = volSma > 0 ? volume / volSma : 1.0
+bool  rvolOk      = rvol >= rvolTh
+bool  volSpikeEvt = rvol >= spikeMult
+
+float obvV   = ta.obv
+float obvEma = ta.ema(obvV, obvLen)
+bool  obvBull = obvV > obvEma
+bool  obvBear = obvV < obvEma
+
+// CMF(Chaikin Money Flow)— ゼロ除算ガード付き
+float mfMult    = high == low ? 0.0 : ((close - low) - (high - close)) / (high - low)
+float cmfVolSum = math.sum(volume, cmfLen)
+float cmfMfvSum = math.sum(mfMult * volume, cmfLen)
+float cmfV      = cmfVolSum > 0 ? cmfMfvSum / cmfVolSum : 0.0
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⑥ OSCILLATOR ENGINE — RSI / Divergence / StochRSI / MFI / ADX (+CCI/WT任意)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+float rsiV = ta.rsi(close, rsiLen)
+float mfiV = ta.mfi(hlc3, mfiLen)
+[diPlus, diMinus, adxV] = ta.dmi(adxLen, adxLen)
+bool adxOkL = adxV >= adxTh and diPlus > diMinus   // トレンド強度+DI方向の一致まで要求
+bool adxOkS = adxV >= adxTh and diMinus > diPlus
+
+// StochRSI
+float stochRaw = ta.stoch(rsiV, rsiV, rsiV, stochLen)
+float srsiK = ta.sma(stochRaw, stochK)
+float srsiD = ta.sma(srsiK, stochD)
+bool stochGcEvt = ta.crossover(srsiK, srsiD) and srsiK < 80    // GC(高値圏のダマシ除外)
+bool stochDcEvt = ta.crossunder(srsiK, srsiD) and srsiK > 20   // DC(安値圏のダマシ除外)
+
+// CCI(任意)
+float cciV = ta.cci(close, cciLen)
+
+// WaveTrend(任意)— LazyBear系の標準実装
+float wtAp  = hlc3
+float wtEsa = ta.ema(wtAp, 10)
+float wtDd  = ta.ema(math.abs(wtAp - wtEsa), 10)
+float wtCi  = wtDd > 0 ? (wtAp - wtEsa) / (0.015 * wtDd) : 0.0
+float wt1   = ta.ema(wtCi, 21)
+float wt2   = ta.sma(wt1, 4)
+bool  wtBull = wt1 > wt2
+bool  wtBear = wt1 < wt2
+
+// ── RSI Regular Divergence(RSIピボット確定ベース = 非リペイント)
+float rsiPl = ta.pivotlow(rsiV, divPivLen, divPivLen)
+float rsiPh = ta.pivothigh(rsiV, divPivLen, divPivLen)
+var float divPrevRsiLo = na
+var float divPrevPxLo  = na
+var float divPrevRsiHi = na
+var float divPrevPxHi  = na
+bool bullDivEvt = false
+bool bearDivEvt = false
+
+if not na(rsiPl)
+    float curRsiLo = rsiV[divPivLen]
+    float curPxLo  = low[divPivLen]
+    // 価格は安値切下げ・RSIは切上げ(かつ売られ気味の水準) = 強気ダイバージェンス
+    if not na(divPrevRsiLo) and curRsiLo > divPrevRsiLo and curPxLo < divPrevPxLo and curRsiLo <= 45
+        bullDivEvt := true
+    divPrevRsiLo := curRsiLo
+    divPrevPxLo  := curPxLo
+if not na(rsiPh)
+    float curRsiHi = rsiV[divPivLen]
+    float curPxHi  = high[divPivLen]
+    // 価格は高値切上げ・RSIは切下げ(かつ買われ気味の水準) = 弱気ダイバージェンス
+    if not na(divPrevRsiHi) and curRsiHi < divPrevRsiHi and curPxHi > divPrevPxHi and curRsiHi >= 55
+        bearDivEvt := true
+    divPrevRsiHi := curRsiHi
+    divPrevPxHi  := curPxHi
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⑦ VOLUME PROFILE ENGINE — POC / VAH / VAL / HVN / LVN(ローリング近似)
+//    直近 vpLookback 本の hl2 を vpRows ビンへ出来高加重で集計。
+//    確定済み過去バーのみ使用 = 非リペイント。
+// ═══════════════════════════════════════════════════════════════════════════════
+
+float vpHi = ta.highest(high, vpLookback)
+float vpLo = ta.lowest(low, vpLookback)
+
+var float vpPoc  = na
+var float vpVah  = na
+var float vpVal  = na
+var float vpHvn2 = na   // 第2HVN(POC以外で最大出来高のビン)
+var float vpLvn  = na   // Value Area内の最小出来高ビン(薄商い帯)
+
+if vpEnabled and bar_index > 30
+    int lb = math.min(vpLookback, bar_index + 1)
+    float step = (vpHi - vpLo) / vpRows
+    if step > 0
+        array<float> vols = array.new<float>(vpRows, 0.0)
+        for i = 0 to lb - 1
+            int binIdx = math.min(vpRows - 1, math.max(0, math.floor((hl2[i] - vpLo) / step)))
+            array.set(vols, binIdx, array.get(vols, binIdx) + nz(volume[i]))
+        // POC(最大出来高ビン)と総出来高
+        int   pocIdx = 0
+        float maxV   = -1.0
+        float totV   = 0.0
+        for r = 0 to vpRows - 1
+            float v = array.get(vols, r)
+            totV += v
+            if v > maxV
+                maxV   := v
+                pocIdx := r
+        // Value Area(POCから両側へ出来高の大きい方に拡張)
+        float vaVol  = maxV
+        float target = totV * vaPct / 100.0
+        int upIdx = pocIdx + 1
+        int dnIdx = pocIdx - 1
+        int guard = 0
+        while vaVol < target and (upIdx < vpRows or dnIdx >= 0) and guard < vpRows * 2
+            float vu = upIdx < vpRows ? array.get(vols, upIdx) : -1.0
+            float vd = dnIdx >= 0 ? array.get(vols, dnIdx) : -1.0
+            if vu >= vd
+                vaVol += vu
+                upIdx += 1
+            else
+                vaVol += vd
+                dnIdx -= 1
+            guard += 1
+        vpPoc := vpLo + (pocIdx + 0.5) * step
+        vpVah := vpLo + upIdx * step
+        vpVal := vpLo + (dnIdx + 1) * step
+        // 第2HVN(POC以外の最大ビン)
+        float sndV   = -1.0
+        int   sndIdx = -1
+        for r = 0 to vpRows - 1
+            float v2 = array.get(vols, r)
+            if r != pocIdx and v2 > sndV
+                sndV   := v2
+                sndIdx := r
+        vpHvn2 := sndIdx >= 0 ? vpLo + (sndIdx + 0.5) * step : na
+        // VA内LVN(POC以外の最小ビン)
+        int vaLoIdx = math.max(dnIdx + 1, 0)
+        int vaHiIdx = math.min(upIdx - 1, vpRows - 1)
+        float lvnV   = na
+        int   lvnIdx = -1
+        if vaHiIdx > vaLoIdx
+            for r = vaLoIdx to vaHiIdx
+                float v3 = array.get(vols, r)
+                if r != pocIdx and (na(lvnV) or v3 < lvnV)
+                    lvnV   := v3
+                    lvnIdx := r
+        vpLvn := lvnIdx >= 0 ? vpLo + (lvnIdx + 0.5) * step : na
+
+// VP反応イベント(VAL/POCで反発 = ロング根拠、VAH/POCで反落 = ショート根拠)
+bool vpBounceLEvt = (not na(vpVal) and low <= vpVal and close > vpVal) or (not na(vpPoc) and low <= vpPoc and close > vpPoc)
+bool vpRejectSEvt = (not na(vpVah) and high >= vpVah and close < vpVah) or (not na(vpPoc) and high >= vpPoc and close < vpPoc)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⑧ AI SCORING ENGINE — 各エンジン0〜1のサブスコア × 重み → 0〜100点
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── イベント経過バー数(全て確定足ベース)
+int bsBreakUp  = ta.barssince(bosUp or chochUp)
+int bsBreakDn  = ta.barssince(bosDn or chochDn)
+int bsMssUp    = ta.barssince(mssUp)
+int bsMssDn    = ta.barssince(mssDn)
+int bsObL      = ta.barssince(obReactL)
+int bsObS      = ta.barssince(obReactS)
+int bsBrkL     = ta.barssince(brkReactL)
+int bsBrkS     = ta.barssince(brkReactS)
+int bsFvgL     = ta.barssince(fvgReactL)
+int bsFvgS     = ta.barssince(fvgReactS)
+int bsSweepL   = ta.barssince(sweepLowEvt)
+int bsSweepS   = ta.barssince(sweepHighEvt)
+int bsBullDiv  = ta.barssince(bullDivEvt)
+int bsBearDiv  = ta.barssince(bearDivEvt)
+int bsStochGc  = ta.barssince(stochGcEvt)
+int bsStochDc  = ta.barssince(stochDcEvt)
+int bsSpike    = ta.barssince(volSpikeEvt)
+int bsVpBnL    = ta.barssince(vpBounceLEvt)
+int bsVpRjS    = ta.barssince(vpRejectSEvt)
+
+// ── 有効期間内フラグ
+bool breakUpRecent  = f_recent(bsBreakUp, smValidBars)
+bool breakDnRecent  = f_recent(bsBreakDn, smValidBars)
+bool mssUpRecent    = f_recent(bsMssUp, smValidBars)
+bool mssDnRecent    = f_recent(bsMssDn, smValidBars)
+bool obLRecent      = f_recent(bsObL, reactValidBars)
+bool obSRecent      = f_recent(bsObS, reactValidBars)
+bool brkLRecent     = f_recent(bsBrkL, reactValidBars)
+bool brkSRecent     = f_recent(bsBrkS, reactValidBars)
+bool fvgLRecent     = f_recent(bsFvgL, reactValidBars)
+bool fvgSRecent     = f_recent(bsFvgS, reactValidBars)
+bool sweepLRecent   = f_recent(bsSweepL, sweepValidBars)
+bool sweepSRecent   = f_recent(bsSweepS, sweepValidBars)
+bool bullDivRecent  = f_recent(bsBullDiv, divValidBars)
+bool bearDivRecent  = f_recent(bsBearDiv, divValidBars)
+bool stochGcRecent  = f_recent(bsStochGc, xValidBars)
+bool stochDcRecent  = f_recent(bsStochDc, xValidBars)
+bool spikeRecent    = f_recent(bsSpike, 3)
+bool vpBnLRecent    = f_recent(bsVpBnL, xValidBars)
+bool vpRjSRecent    = f_recent(bsVpRjS, xValidBars)
+
+// ── [Trend] サブスコア(合計1.0)
+float fTrendL = 0.0
+fTrendL += close > ema20V ? 0.15 : 0.0
+fTrendL += ema20V > ema50V ? 0.20 : 0.0
+fTrendL += ema50V > ema200V ? 0.20 : 0.0
+fTrendL += close > ema200V ? 0.15 : 0.0
+fTrendL += stUp ? 0.30 : 0.0
+float fTrendS = 0.0
+fTrendS += close < ema20V ? 0.15 : 0.0
+fTrendS += ema20V < ema50V ? 0.20 : 0.0
+fTrendS += ema50V < ema200V ? 0.20 : 0.0
+fTrendS += close < ema200V ? 0.15 : 0.0
+fTrendS += stDn ? 0.30 : 0.0
+
+// ── [VWAP] サブスコア(使用中のVWAPで正規化)
+float vwapDen = (useSessVwap ? 0.4 : 0.0) + (useWeekVwap ? 0.3 : 0.0) + (useMonVwap ? 0.3 : 0.0)
+float vwapNumL = 0.0
+vwapNumL += useSessVwap and close > sessVwap ? 0.4 : 0.0
+vwapNumL += useWeekVwap and close > weekVwap ? 0.3 : 0.0
+vwapNumL += useMonVwap and close > monVwap ? 0.3 : 0.0
+float vwapNumS = 0.0
+vwapNumS += useSessVwap and close < sessVwap ? 0.4 : 0.0
+vwapNumS += useWeekVwap and close < weekVwap ? 0.3 : 0.0
+vwapNumS += useMonVwap and close < monVwap ? 0.3 : 0.0
+float fVwapL = vwapDen > 0 ? vwapNumL / vwapDen : 0.0
+float fVwapS = vwapDen > 0 ? vwapNumS / vwapDen : 0.0
+
+// ── [Smart Money] サブスコア(合計1.0 / Sweep+EQはボーナス込み)
+float fSmL = 0.0
+fSmL += structDir == 1 ? 0.20 : 0.0
+fSmL += mssUpRecent ? 0.15 : breakUpRecent ? 0.12 : 0.0
+fSmL += obLRecent ? 0.15 : 0.0
+fSmL += fvgLRecent ? 0.15 : 0.0
+fSmL += sweepLRecent ? (sweepLWasEq ? 0.20 : 0.18) : 0.0
+fSmL += discountZone ? 0.10 : 0.0
+fSmL += brkLRecent ? 0.05 : 0.0
+float fSmS = 0.0
+fSmS += structDir == -1 ? 0.20 : 0.0
+fSmS += mssDnRecent ? 0.15 : breakDnRecent ? 0.12 : 0.0
+fSmS += obSRecent ? 0.15 : 0.0
+fSmS += fvgSRecent ? 0.15 : 0.0
+fSmS += sweepSRecent ? (sweepHWasEq ? 0.20 : 0.18) : 0.0
+fSmS += premiumZone ? 0.10 : 0.0
+fSmS += brkSRecent ? 0.05 : 0.0
+
+// ── [Volume] サブスコア(合計1.0)
+float fVolL = 0.0
+fVolL += rvolOk ? 0.30 : 0.0
+fVolL += spikeRecent ? 0.20 : 0.0
+fVolL += obvBull ? 0.25 : 0.0
+fVolL += cmfV > 0 ? 0.25 : 0.0
+float fVolS = 0.0
+fVolS += rvolOk ? 0.30 : 0.0
+fVolS += spikeRecent ? 0.20 : 0.0
+fVolS += obvBear ? 0.25 : 0.0
+fVolS += cmfV < 0 ? 0.25 : 0.0
+
+// ── [Oscillator] サブスコア(CCI/WT有効時は分母も加算して正規化)
+float oscDen = 1.0 + (useCci ? 0.10 : 0.0) + (useWt ? 0.10 : 0.0)
+float oscNumL = 0.0
+oscNumL += rsiV > 50 ? 0.20 : 0.0
+oscNumL += bullDivRecent ? 0.25 : 0.0
+oscNumL += stochGcRecent ? 0.20 : 0.0
+oscNumL += mfiV > 50 ? 0.15 : 0.0
+oscNumL += adxOkL ? 0.20 : 0.0
+oscNumL += useCci and cciV > 0 ? 0.10 : 0.0
+oscNumL += useWt and wtBull ? 0.10 : 0.0
+float oscNumS = 0.0
+oscNumS += rsiV < 50 ? 0.20 : 0.0
+oscNumS += bearDivRecent ? 0.25 : 0.0
+oscNumS += stochDcRecent ? 0.20 : 0.0
+oscNumS += mfiV < 50 ? 0.15 : 0.0
+oscNumS += adxOkS ? 0.20 : 0.0
+oscNumS += useCci and cciV < 0 ? 0.10 : 0.0
+oscNumS += useWt and wtBear ? 0.10 : 0.0
+float fOscL = oscNumL / oscDen
+float fOscS = oscNumS / oscDen
+
+// ── [Volume Profile] サブスコア(合計1.0)
+float fVpL = 0.0
+fVpL += not na(vpPoc) and close > vpPoc ? 0.35 : 0.0
+fVpL += not na(vpVal) and close >= vpVal ? 0.15 : 0.0
+fVpL += vpBnLRecent ? 0.30 : 0.0
+fVpL += not na(vpHvn2) and vpHvn2 < close and close - vpHvn2 <= atrVal * 2 ? 0.10 : 0.0   // 直下にHVNサポート
+fVpL += not na(vpLvn) and close > vpLvn ? 0.10 : 0.0                                       // 薄商い帯を上抜け済み
+float fVpS = 0.0
+fVpS += not na(vpPoc) and close < vpPoc ? 0.35 : 0.0
+fVpS += not na(vpVah) and close <= vpVah ? 0.15 : 0.0
+fVpS += vpRjSRecent ? 0.30 : 0.0
+fVpS += not na(vpHvn2) and vpHvn2 > close and vpHvn2 - close <= atrVal * 2 ? 0.10 : 0.0   // 直上にHVNレジスタンス
+fVpS += not na(vpLvn) and close < vpLvn ? 0.10 : 0.0                                       // 薄商い帯を下抜け済み
+
+// ── 総合スコア(未使用エンジンの重みは除外して正規化 → 常に0〜100)
+float wVwapEff = vwapDen > 0 ? wVwap : 0.0
+float wVpEff   = vpEnabled and not na(vpPoc) ? wVp : 0.0
+float wSumEff  = wTrend + wVwapEff + wSm + wVol + wOsc + wVpEff
+float scoreL = wSumEff > 0 ? (fTrendL * wTrend + fVwapL * wVwapEff + fSmL * wSm + fVolL * wVol + fOscL * wOsc + fVpL * wVpEff) / wSumEff * 100.0 : 0.0
+float scoreS = wSumEff > 0 ? (fTrendS * wTrend + fVwapS * wVwapEff + fSmS * wSm + fVolS * wVol + fOscS * wOsc + fVpS * wVpEff) / wSumEff * 100.0 : 0.0
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⑨ ENTRY ENGINE — Ultimate Long / Short 判定と Entry・SL・TP 描画
+//    必須条件: AI Score >= 閾値 + EMA完全順張り + VWAP優位側
+//    追加条件: 9種コンフルエンスのうち minConf 個以上の一致
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── コンフルエンスカウント(Long)
+int confL = 0
+confL += breakUpRecent ? 1 : 0     // BOS/CHoCH確認
+confL += fvgLRecent ? 1 : 0        // FVG/IFVG反応
+confL += obLRecent or brkLRecent ? 1 : 0   // OB/Mitigation/Breaker反応
+confL += sweepLRecent ? 1 : 0      // Liquidity Sweep後
+confL += bullDivRecent ? 1 : 0     // RSI強気ダイバージェンス
+confL += stochGcRecent ? 1 : 0     // StochRSIゴールデンクロス
+confL += adxOkL ? 1 : 0            // ADX閾値以上+DI方向一致
+confL += rvolOk ? 1 : 0            // Relative Volume増加
+confL += spikeRecent ? 1 : 0       // Volume Spike
+
+// ── コンフルエンスカウント(Short)
+int confS = 0
+confS += breakDnRecent ? 1 : 0
+confS += fvgSRecent ? 1 : 0
+confS += obSRecent or brkSRecent ? 1 : 0
+confS += sweepSRecent ? 1 : 0
+confS += bearDivRecent ? 1 : 0
+confS += stochDcRecent ? 1 : 0
+confS += adxOkS ? 1 : 0
+confS += rvolOk ? 1 : 0
+confS += spikeRecent ? 1 : 0
+
+// ── VWAP必須条件(有効なVWAPの優先順: Session > Weekly > Monthly)
+bool mandVwapL = useSessVwap ? close > sessVwap : useWeekVwap ? close > weekVwap : useMonVwap ? close > monVwap : true
+bool mandVwapS = useSessVwap ? close < sessVwap : useWeekVwap ? close < weekVwap : useMonVwap ? close < monVwap : true
+
+// ── クールダウン(乱発防止)
+var int lastSignalBar = na
+bool cooldownOk = na(lastSignalBar) or bar_index - lastSignalBar >= cooldownBars
+
+// ── Ultimate シグナル(確定足のみ = 非リペイント)
+bool longSignal  = barstate.isconfirmed and scoreL >= scoreTh and emaBullL and mandVwapL and confL >= minConf and cooldownOk
+bool shortSignal = barstate.isconfirmed and scoreS >= scoreTh and emaBearS and mandVwapS and confS >= minConf and cooldownOk
+
+if longSignal or shortSignal
+    lastSignalBar := bar_index
+
+// ── SL算出(Swing方式はスイング割れ+バッファ、無効時はATR方式へフォールバック)
+f_stopLong(float entryP) =>
+    float swingSl = not na(lastPL) and lastPL < entryP ? lastPL - atrVal * slBufAtr : na
+    slMode == "Swing" and not na(swingSl) ? swingSl : entryP - atrVal * slAtrMult
+
+f_stopShort(float entryP) =>
+    float swingSl = not na(lastPH) and lastPH > entryP ? lastPH + atrVal * slBufAtr : na
+    slMode == "Swing" and not na(swingSl) ? swingSl : entryP + atrVal * slAtrMult
+
+// ── 描画オブジェクト管理(最新トレードの水準線のみ保持 = オブジェクト数を常時抑制)
+var array<line>  tradeLines  = array.new<line>()
+var array<label> tradeLabels = array.new<label>()
+
+f_clearTradeObjects() =>
+    while array.size(tradeLines) > 0
+        line.delete(array.pop(tradeLines))
+    while array.size(tradeLabels) > 0
+        label.delete(array.pop(tradeLabels))
+
+f_level(float y, color col, string lvlName, bool show) =>
+    if show and not na(y)
+        line  ln = line.new(bar_index, y, bar_index + extendBars, y, color = col, width = 1, style = lvlName == "ENTRY" ? line.style_solid : line.style_dashed)
+        label lb = label.new(bar_index + extendBars, y, lvlName + "  " + str.tostring(y, format.mintick), style = label.style_label_left, color = color.new(col, 85), textcolor = col, size = size.small)
+        array.push(tradeLines, ln)
+        array.push(tradeLabels, lb)
+
+// ── シグナル描画
+if longSignal
+    float entryP = close
+    float slP    = f_stopLong(entryP)
+    float riskR  = entryP - slP
+    if showLong
+        string txtL = "▲ LONG" + (showScoreOn ? "  " + str.tostring(math.round(scoreL)) : "")
+        label.new(bar_index, na, txtL, yloc = yloc.belowbar, style = label.style_label_up, color = colLong, textcolor = color.white, size = size.normal)
+    f_clearTradeObjects()
+    f_level(entryP, colEntry, "ENTRY", showEntry)
+    f_level(slP, colSL, "SL", showSL)
+    f_level(entryP + riskR * tp1R, colTP, "TP1", showTP1)
+    f_level(entryP + riskR * tp2R, colTP, "TP2", showTP2)
+    f_level(entryP + riskR * tp3R, colTP, "TP3", showTP3)
+
+if shortSignal
+    float entryP = close
+    float slP    = f_stopShort(entryP)
+    float riskR  = slP - entryP
+    if showShort
+        string txtS = "▼ SHORT" + (showScoreOn ? "  " + str.tostring(math.round(scoreS)) : "")
+        label.new(bar_index, na, txtS, yloc = yloc.abovebar, style = label.style_label_down, color = colShort, textcolor = color.white, size = size.normal)
+    f_clearTradeObjects()
+    f_level(entryP, colEntry, "ENTRY", showEntry)
+    f_level(slP, colSL, "SL", showSL)
+    f_level(entryP - riskR * tp1R, colTP, "TP1", showTP1)
+    f_level(entryP - riskR * tp2R, colTP, "TP2", showTP2)
+    f_level(entryP - riskR * tp3R, colTP, "TP3", showTP3)
+
+// ── スコアはチャートを汚さずデータウィンドウのみに出力
+plot(scoreL, "AI Score (Long)",  color.new(#089981, 0), display = display.data_window)
+plot(scoreS, "AI Score (Short)", color.new(#f23645, 0), display = display.data_window)
+plot(confL,  "Confluence (Long)",  color.new(#089981, 50), display = display.data_window)
+plot(confS,  "Confluence (Short)", color.new(#f23645, 50), display = display.data_window)
+plot(stValue, "SuperTrend", color.new(color.gray, 50), display = display.data_window)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⑩ ALERT SYSTEM — alertcondition(発火は「1バーにつき1回(終値)」設定を推奨)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+alertcondition(longSignal,                 "UES: Ultimate Long",     "UES ▲ Ultimate LONG {{ticker}} {{interval}} @ {{close}}")
+alertcondition(shortSignal,                "UES: Ultimate Short",    "UES ▼ Ultimate SHORT {{ticker}} {{interval}} @ {{close}}")
+alertcondition(bosUp or bosDn,             "UES: BOS",               "UES BOS(構造ブレイク) {{ticker}} {{interval}} @ {{close}}")
+alertcondition(chochUp or chochDn,         "UES: CHoCH",             "UES CHoCH(構造転換) {{ticker}} {{interval}} @ {{close}}")
+alertcondition(sweepLowEvt or sweepHighEvt,"UES: Liquidity Sweep",   "UES Liquidity Sweep {{ticker}} {{interval}} @ {{close}}")
+alertcondition(bullDivEvt or bearDivEvt,   "UES: RSI Divergence",    "UES RSI Divergence {{ticker}} {{interval}} @ {{close}}")
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⑫ DEBUG — スコア内訳テーブル(デフォルトOFF / 最終バーのみ更新で軽量)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+if showDebug
+    var table dbgT = table.new(position.bottom_right, 3, 10, bgcolor = color.new(color.black, 15), border_width = 1, border_color = color.new(color.gray, 70))
+    if barstate.islast
+        color cHead = color.new(color.white, 0)
+        color cL = color.new(#26a69a, 0)
+        color cS = color.new(#ef5350, 0)
+        table.cell(dbgT, 0, 0, "UES Debug", text_color = cHead, text_size = size.tiny)
+        table.cell(dbgT, 1, 0, "LONG",  text_color = cL, text_size = size.tiny)
+        table.cell(dbgT, 2, 0, "SHORT", text_color = cS, text_size = size.tiny)
+        table.cell(dbgT, 0, 1, "Trend",  text_color = cHead, text_size = size.tiny)
+        table.cell(dbgT, 1, 1, str.tostring(fTrendL, "0.00"), text_color = cL, text_size = size.tiny)
+        table.cell(dbgT, 2, 1, str.tostring(fTrendS, "0.00"), text_color = cS, text_size = size.tiny)
+        table.cell(dbgT, 0, 2, "VWAP",   text_color = cHead, text_size = size.tiny)
+        table.cell(dbgT, 1, 2, str.tostring(fVwapL, "0.00"), text_color = cL, text_size = size.tiny)
+        table.cell(dbgT, 2, 2, str.tostring(fVwapS, "0.00"), text_color = cS, text_size = size.tiny)
+        table.cell(dbgT, 0, 3, "SmartMoney", text_color = cHead, text_size = size.tiny)
+        table.cell(dbgT, 1, 3, str.tostring(fSmL, "0.00"), text_color = cL, text_size = size.tiny)
+        table.cell(dbgT, 2, 3, str.tostring(fSmS, "0.00"), text_color = cS, text_size = size.tiny)
+        table.cell(dbgT, 0, 4, "Volume", text_color = cHead, text_size = size.tiny)
+        table.cell(dbgT, 1, 4, str.tostring(fVolL, "0.00"), text_color = cL, text_size = size.tiny)
+        table.cell(dbgT, 2, 4, str.tostring(fVolS, "0.00"), text_color = cS, text_size = size.tiny)
+        table.cell(dbgT, 0, 5, "Oscillator", text_color = cHead, text_size = size.tiny)
+        table.cell(dbgT, 1, 5, str.tostring(fOscL, "0.00"), text_color = cL, text_size = size.tiny)
+        table.cell(dbgT, 2, 5, str.tostring(fOscS, "0.00"), text_color = cS, text_size = size.tiny)
+        table.cell(dbgT, 0, 6, "Vol Profile", text_color = cHead, text_size = size.tiny)
+        table.cell(dbgT, 1, 6, str.tostring(fVpL, "0.00"), text_color = cL, text_size = size.tiny)
+        table.cell(dbgT, 2, 6, str.tostring(fVpS, "0.00"), text_color = cS, text_size = size.tiny)
+        table.cell(dbgT, 0, 7, "AI Score", text_color = cHead, text_size = size.tiny)
+        table.cell(dbgT, 1, 7, str.tostring(scoreL, "0.0"), text_color = cL, text_size = size.tiny)
+        table.cell(dbgT, 2, 7, str.tostring(scoreS, "0.0"), text_color = cS, text_size = size.tiny)
+        table.cell(dbgT, 0, 8, "Confluence", text_color = cHead, text_size = size.tiny)
+        table.cell(dbgT, 1, 8, str.tostring(confL) + "/9", text_color = cL, text_size = size.tiny)
+        table.cell(dbgT, 2, 8, str.tostring(confS) + "/9", text_color = cS, text_size = size.tiny)
+        // OBのライフサイクル状態: OB=未タッチ / MIT=Mitigation Block化 / BRK=Breaker化
+        string zoneL = bullObActive ? (bullObMitigated ? "MIT" : "OB") : bullBrkActive ? "BRK" : "—"
+        string zoneS = bearObActive ? (bearObMitigated ? "MIT" : "OB") : bearBrkActive ? "BRK" : "—"
+        table.cell(dbgT, 0, 9, "Zone", text_color = cHead, text_size = size.tiny)
+        table.cell(dbgT, 1, 9, zoneL, text_color = cL, text_size = size.tiny)
+        table.cell(dbgT, 2, 9, zoneS, text_color = cS, text_size = size.tiny)
